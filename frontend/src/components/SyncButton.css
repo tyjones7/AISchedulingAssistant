@@ -1,0 +1,154 @@
+/* ============================================
+   Sync Button - Header Integration
+   ============================================ */
+
+.sync-container {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Sync Info (left side) */
+.sync-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.sync-status-text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-primary-600);
+  font-weight: 500;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--color-primary-500);
+  border-radius: 50%;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.last-sync-text {
+  font-size: var(--text-xs);
+  color: var(--color-slate-500);
+}
+
+.last-sync-text.is-stale {
+  color: var(--color-warning-600);
+}
+
+.stale-indicator {
+  font-size: 10px;
+  color: var(--color-warning-500);
+  font-weight: 500;
+}
+
+.sync-error-text {
+  font-size: var(--text-xs);
+  color: var(--color-error-600);
+  max-width: 150px;
+  text-align: right;
+}
+
+/* Sync Button */
+.sync-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-primary-600);
+  color: white;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sync-btn:hover:not(:disabled) {
+  background: var(--color-primary-700);
+  transform: translateY(-1px);
+}
+
+.sync-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.sync-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.sync-btn.is-syncing {
+  background: var(--color-primary-500);
+}
+
+.sync-btn.is-stale {
+  animation: pulse-button 2s ease-in-out infinite;
+}
+
+@keyframes pulse-button {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+}
+
+/* Sync Icon */
+.sync-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sync-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.sync-icon.is-spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Button label */
+.sync-label {
+  display: block;
+}
+
+/* Responsive - hide label on small screens */
+@media (max-width: 480px) {
+  .sync-label {
+    display: none;
+  }
+
+  .sync-btn {
+    padding: var(--space-2);
+  }
+
+  .sync-info {
+    display: none;
+  }
+}
