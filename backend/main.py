@@ -43,6 +43,9 @@ class SyncStatusResponse(BaseModel):
     assignments_added: int = 0
     assignments_updated: int = 0
     courses_scraped: int = 0
+    total_courses: int = 0
+    current_course: int = 0
+    current_course_name: str = ""
 
 
 class LoginRequest(BaseModel):
@@ -60,6 +63,14 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError(
+        "Missing required environment variables: "
+        + ("SUPABASE_URL " if not SUPABASE_URL else "")
+        + ("SUPABASE_KEY" if not SUPABASE_KEY else "")
+        + ". Check your .env file or environment."
+    )
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="AI Scheduling Assistant API", version="1.0.0")
@@ -67,9 +78,10 @@ app = FastAPI(title="AI Scheduling Assistant API", version="1.0.0")
 logger.info("FastAPI app initialized")
 
 # Configure CORS to allow requests from the React frontend
+CORS_ORIGIN = os.getenv("CORS_ORIGIN", "http://localhost:5173")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite dev server port
+    allow_origins=[origin.strip() for origin in CORS_ORIGIN.split(",")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -136,8 +148,49 @@ def browser_login():
                 import re
                 if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
                     logger.info(f"Browser auth [{task_id[:8]}] - Login successful!")
-                    scraper.dynamic_base_url = scraper._extract_dynamic_base_url()
-                    auth_store.set_authenticated(scraper)
+                    dynamic_base_url = scraper._extract_dynamic_base_url()
+                    cookies = scraper.driver.get_cookies()
+                    logger.info(f"Browser auth [{task_id[:8]}] - Extracted {len(cookies)} cookies")
+
+                    # Log cookie details for debugging session issues
+                    for c in cookies:
+                        logger.debug(f"Browser auth [{task_id[:8]}] - Cookie: {c.get('name')} domain={c.get('domain')} secure={c.get('secure')} httpOnly={c.get('httpOnly')} sameSite={c.get('sameSite')}")
+
+                    # Extract localStorage and sessionStorage for session persistence
+                    local_storage = {}
+                    session_storage = {}
+                    try:
+                        local_storage = scraper.driver.execute_script(
+                            "var items = {}; "
+                            "for (var i = 0; i < localStorage.length; i++) { "
+                            "  var key = localStorage.key(i); "
+                            "  items[key] = localStorage.getItem(key); "
+                            "} "
+                            "return items;"
+                        ) or {}
+                        logger.info(f"Browser auth [{task_id[:8]}] - Extracted {len(local_storage)} localStorage items")
+                    except Exception as e:
+                        logger.debug(f"Browser auth [{task_id[:8]}] - Could not extract localStorage: {e}")
+
+                    try:
+                        session_storage = scraper.driver.execute_script(
+                            "var items = {}; "
+                            "for (var i = 0; i < sessionStorage.length; i++) { "
+                            "  var key = sessionStorage.key(i); "
+                            "  items[key] = sessionStorage.getItem(key); "
+                            "} "
+                            "return items;"
+                        ) or {}
+                        logger.info(f"Browser auth [{task_id[:8]}] - Extracted {len(session_storage)} sessionStorage items")
+                    except Exception as e:
+                        logger.debug(f"Browser auth [{task_id[:8]}] - Could not extract sessionStorage: {e}")
+
+                    # Store cookies + URL + web storage, then close the visible browser
+                    auth_store.set_session_data(cookies, dynamic_base_url)
+                    auth_store.set_web_storage(local_storage, session_storage)
+                    scraper.close()
+                    logger.info(f"Browser auth [{task_id[:8]}] - Visible browser closed")
+
                     auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.AUTHENTICATED)
                     return
 
@@ -210,26 +263,31 @@ def get_assignments():
 @app.get("/assignments/stats/summary")
 def get_assignment_stats():
     """Get assignment statistics for the dashboard."""
+    from zoneinfo import ZoneInfo
+
     response = supabase.table("assignments").select("*").execute()
     assignments = response.data or []
 
-    now = datetime.now(timezone.utc)
-    today = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    week_end = today + timedelta(days=7)
+    mountain = ZoneInfo("America/Denver")
+    now_mt = datetime.now(mountain)
+    today_mt = datetime(now_mt.year, now_mt.month, now_mt.day, tzinfo=mountain)
+    week_end_mt = today_mt + timedelta(days=7)
 
     total = len(assignments)
     submitted = sum(1 for a in assignments if a.get("status") == "submitted")
 
-    # Due this week (not submitted)
+    # Due this week (not submitted) - compare in Mountain Time
     due_this_week = 0
     for a in assignments:
         if a.get("status") != "submitted" and a.get("due_date"):
             try:
                 due = datetime.fromisoformat(a["due_date"].replace("Z", "+00:00"))
                 if due.tzinfo is None:
-                    due = due.replace(tzinfo=timezone.utc)
-                due_date_only = datetime(due.year, due.month, due.day, tzinfo=timezone.utc)
-                if today <= due_date_only < week_end:
+                    due = due.replace(tzinfo=mountain)
+                # Convert to Mountain Time for comparison
+                due_mt = due.astimezone(mountain)
+                due_date_only = datetime(due_mt.year, due_mt.month, due_mt.day, tzinfo=mountain)
+                if today_mt <= due_date_only < week_end_mt:
                     due_this_week += 1
             except (ValueError, TypeError):
                 pass

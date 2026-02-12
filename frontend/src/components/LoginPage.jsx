@@ -25,9 +25,12 @@ function LoginPage({ onLoginSuccess }) {
         setStatus(data.status)
 
         if (data.status === 'authenticated') {
-          setLoading(false)
           setTaskId(null)
-          onLoginSuccess()
+          // Brief delay for a smooth "Login successful!" transition
+          setTimeout(() => {
+            setLoading(false)
+            onLoginSuccess()
+          }, 800)
         } else if (data.status === 'failed') {
           setLoading(false)
           setTaskId(null)
@@ -79,7 +82,7 @@ function LoginPage({ onLoginSuccess }) {
       case 'waiting_for_mfa':
         return 'Complete Duo MFA in the browser...'
       case 'authenticated':
-        return 'Login successful!'
+        return 'Login successful! Loading assignments...'
       default:
         return 'Connecting...'
     }
@@ -107,8 +110,16 @@ function LoginPage({ onLoginSuccess }) {
           )}
 
           {loading && status && (
-            <div className="login-status">
-              <span className="status-spinner" />
+            <div className={`login-status ${status === 'authenticated' ? 'login-success' : ''}`}>
+              {status === 'authenticated' ? (
+                <span className="success-check-wrap">
+                  <svg className="success-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </span>
+              ) : (
+                <span className="status-spinner" />
+              )}
               <span className="status-message">{getStatusMessage()}</span>
             </div>
           )}

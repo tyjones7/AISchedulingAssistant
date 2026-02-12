@@ -1,160 +1,219 @@
 /* ============================================
-   Assignment Card
+   Assignment Card - Apple-Inspired
    ============================================ */
 
 .assignment-card {
-  background: white;
+  background: var(--color-bg);
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--color-slate-200);
-  transition: all var(--transition-fast);
+  padding: var(--space-4) var(--space-5);
+  box-shadow: var(--shadow-card);
+  transition: all var(--transition-normal);
+  cursor: default;
+}
+
+.assignment-card.is-clickable {
+  cursor: pointer;
 }
 
 .assignment-card:hover {
-  box-shadow: var(--shadow-md);
-  border-color: var(--color-slate-300);
+  box-shadow: var(--shadow-card-hover);
+  transform: scale(1.01);
 }
 
 .assignment-card.is-updating {
-  opacity: 0.6;
+  opacity: 0.5;
   pointer-events: none;
 }
 
-.assignment-card.is-overdue-card {
-  border-left: 3px solid var(--color-error-500);
+/* Urgency left accent */
+.assignment-card.urgency-overdue {
+  border-left: 3px solid var(--color-status-overdue);
 }
 
-/* Compact Mode */
+.assignment-card.urgency-today {
+  border-left: 3px solid var(--color-status-today);
+}
+
+.assignment-card.urgency-tomorrow {
+  border-left: 3px solid #FFCC00;
+}
+
+/* ============================================
+   Compact Mode
+   ============================================ */
+
 .assignment-card.is-compact {
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
 }
 
-.assignment-card.is-compact .assignment-title {
+.assignment-card.is-compact .card-title {
   font-size: var(--text-sm);
 }
 
-.assignment-card.is-compact .card-footer {
+.assignment-card.is-compact .card-actions {
   padding-top: var(--space-2);
   margin-top: var(--space-2);
 }
 
-/* Card Header */
-.card-header {
-  margin-bottom: var(--space-2);
+.assignment-card.is-compact .card-meta {
+  margin-top: var(--space-1);
 }
 
-.card-title-section {
+/* ============================================
+   Card Top (Title + Time Remaining)
+   ============================================ */
+
+.card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.card-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: var(--leading-snug);
   flex: 1;
   min-width: 0;
 }
 
-.assignment-title {
-  font-size: var(--text-sm);
+/* Time Remaining Badge */
+.time-remaining {
+  font-size: 11px;
   font-weight: 600;
-  color: var(--color-slate-900);
-  margin: 0 0 var(--space-2) 0;
-  line-height: var(--leading-tight);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.1px;
 }
 
-/* Card Meta (course + status) */
+.time-remaining.time-overdue {
+  background: var(--color-status-overdue-bg);
+  color: var(--color-status-overdue);
+}
+
+.time-remaining.time-today {
+  background: var(--color-status-today-bg);
+  color: #CC7700;
+}
+
+.time-remaining.time-tomorrow {
+  background: rgba(255, 204, 0, 0.1);
+  color: #997A00;
+}
+
+.time-remaining.time-soon {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
+.time-remaining.time-later {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+}
+
+/* ============================================
+   Card Meta (Course + Status + Estimate)
+   ============================================ */
+
 .card-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
-/* Course Badge */
-.course-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px var(--space-2);
-  background: var(--color-slate-100);
-  color: var(--color-slate-600);
+.card-course {
   font-size: 11px;
   font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 2px 8px;
   border-radius: var(--radius-sm);
-  white-space: nowrap;
-  max-width: 160px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Status Badge */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 2px var(--space-2);
+/* Status pill */
+.card-status {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
+  padding: 2px 8px;
   border-radius: var(--radius-full);
   white-space: nowrap;
 }
 
-.status-badge.status-newly_assigned {
-  background: var(--color-primary-100);
-  color: var(--color-primary-700);
+.card-status.status-newly_assigned {
+  background: var(--color-status-new-bg);
+  color: var(--color-status-new);
 }
 
-.status-badge.status-not_started {
-  background: var(--color-slate-100);
-  color: var(--color-slate-600);
+.card-status.status-not_started {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
 }
 
-.status-badge.status-in_progress {
-  background: var(--color-warning-100);
-  color: var(--color-warning-600);
+.card-status.status-in_progress {
+  background: var(--color-status-progress-bg);
+  color: var(--color-status-progress);
 }
 
-.status-badge.status-submitted {
-  background: var(--color-success-100);
-  color: var(--color-success-600);
+.card-status.status-submitted {
+  background: var(--color-status-success-bg);
+  color: var(--color-status-success);
 }
 
-.status-badge.status-unavailable {
-  background: var(--color-slate-200);
-  color: var(--color-slate-500);
+.card-status.status-unavailable {
+  background: var(--color-status-muted-bg);
+  color: var(--color-status-muted);
 }
 
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+/* Estimated time */
+.card-estimate {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
 }
 
-/* Due Date */
-.due-date {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+/* ============================================
+   Due Date
+   ============================================ */
+
+.card-due {
+  margin-top: var(--space-2);
+}
+
+.due-text {
   font-size: var(--text-xs);
-  color: var(--color-slate-500);
-  margin: 0 0 var(--space-2) 0;
+  color: var(--color-text-secondary);
+  font-weight: 400;
 }
 
-.due-date svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.due-date.is-overdue {
-  color: var(--color-error-600);
+.due-text.is-overdue {
+  color: var(--color-status-overdue);
   font-weight: 500;
 }
 
-.overdue-label {
-  font-weight: 600;
+.due-text.no-date {
+  color: var(--color-text-tertiary);
+  font-style: italic;
 }
 
-/* Description */
-.assignment-description {
+/* ============================================
+   Description
+   ============================================ */
+
+.card-description {
   font-size: var(--text-sm);
-  color: var(--color-slate-600);
-  margin: 0 0 var(--space-3) 0;
+  color: var(--color-text-secondary);
+  margin: var(--space-2) 0 0 0;
   line-height: var(--leading-relaxed);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -162,24 +221,27 @@
   overflow: hidden;
 }
 
-/* Card Footer */
-.card-footer {
+/* ============================================
+   Card Actions
+   ============================================ */
+
+.card-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   padding-top: var(--space-3);
-  margin-top: var(--space-2);
-  border-top: 1px solid var(--color-slate-100);
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
 }
 
-/* Quick Actions */
-.quick-actions {
+.action-buttons {
   display: flex;
   align-items: center;
   gap: var(--space-1);
 }
 
+/* Quick Action Buttons */
 .quick-action-btn {
   display: inline-flex;
   align-items: center;
@@ -188,11 +250,11 @@
   font-size: 11px;
   font-weight: 500;
   border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: var(--color-slate-50);
-  color: var(--color-slate-600);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all var(--transition-normal);
   text-decoration: none;
 }
 
@@ -202,44 +264,44 @@
 }
 
 .quick-action-btn:hover:not(:disabled) {
-  background: var(--color-slate-100);
-  color: var(--color-slate-700);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .quick-action-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
-/* Action variants */
+/* Action Variants */
 .quick-action-btn.action-open {
-  color: var(--color-primary-600);
+  color: var(--color-accent);
 }
 
 .quick-action-btn.action-open:hover {
-  background: var(--color-primary-50);
-  color: var(--color-primary-700);
+  background: var(--color-accent-light);
 }
 
 .quick-action-btn.action-start {
-  color: var(--color-warning-600);
+  color: var(--color-status-progress);
 }
 
 .quick-action-btn.action-start:hover:not(:disabled) {
-  background: var(--color-warning-50);
-  color: var(--color-warning-700);
+  background: var(--color-status-progress-bg);
 }
 
 .quick-action-btn.action-done {
-  color: var(--color-success-600);
+  color: var(--color-status-success);
 }
 
 .quick-action-btn.action-done:hover:not(:disabled) {
-  background: var(--color-success-50);
-  color: var(--color-success-600);
+  background: var(--color-status-success-bg);
 }
 
-/* Status Dropdown */
+/* ============================================
+   Status Dropdown
+   ============================================ */
+
 .status-controls {
   display: flex;
   align-items: center;
@@ -249,42 +311,40 @@
 
 .status-select {
   appearance: none;
-  background: var(--color-slate-50);
-  border: 1px solid var(--color-slate-200);
+  background: var(--color-bg-tertiary);
+  border: none;
   border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-6) var(--space-1) var(--space-2);
   font-size: 11px;
   font-weight: 500;
-  color: var(--color-slate-700);
+  color: var(--color-text-primary);
   cursor: pointer;
-  transition: all var(--transition-fast);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  transition: all var(--transition-normal);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2386868B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 6px center;
 }
 
 .status-select:hover {
-  border-color: var(--color-slate-300);
-  background-color: var(--color-slate-100);
+  background-color: var(--color-slate-200);
 }
 
 .status-select:focus {
   outline: none;
-  border-color: var(--color-primary-500);
-  box-shadow: 0 0 0 2px var(--color-primary-100);
+  box-shadow: 0 0 0 2px var(--color-accent-light);
 }
 
 .status-select:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 /* Update Spinner */
 .update-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--color-slate-200);
-  border-top-color: var(--color-primary-600);
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--color-border);
+  border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -295,25 +355,31 @@
   }
 }
 
-/* Responsive */
-@media (max-width: 480px) {
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 640px) {
   .assignment-card {
-    padding: var(--space-3);
+    padding: var(--space-3) var(--space-4);
   }
 
-  .card-meta {
+  .card-top {
     flex-direction: column;
-    align-items: flex-start;
     gap: var(--space-1);
   }
 
-  .card-footer {
+  .time-remaining {
+    align-self: flex-start;
+  }
+
+  .card-actions {
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-2);
   }
 
-  .quick-actions {
+  .action-buttons {
     justify-content: flex-start;
     flex-wrap: wrap;
   }
@@ -322,7 +388,9 @@
     margin-left: 0;
     justify-content: flex-end;
   }
+}
 
+@media (max-width: 480px) {
   .quick-action-btn span {
     display: none;
   }

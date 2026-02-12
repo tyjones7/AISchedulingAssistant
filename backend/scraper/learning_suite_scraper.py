@@ -69,9 +69,9 @@ class LearningSuiteScraper:
         'take': 'not_started',
 
         # Submitted - ONLY when we're certain it's been turned in
-        # 'completed' explicitly means done
         'completed': 'submitted',
         'graded': 'submitted',
+        'resubmit': 'submitted',  # Can resubmit means already submitted once
 
         # Closed/unavailable
         'closed': 'not_started',  # Missed it but still mark as not started
@@ -79,8 +79,18 @@ class LearningSuiteScraper:
     }
 
     # These button texts are AMBIGUOUS - 'view' can mean view results OR view assignment
-    # Default to not_started for safety
-    AMBIGUOUS_BUTTONS = {'view', 'view/submit', 'resubmit'}
+    # Default to not_started for safety (unless has_score overrides)
+    AMBIGUOUS_BUTTONS = {'view', 'view/submit'}
+
+    # Session error indicators that suggest we need to re-authenticate
+    SESSION_EXPIRED_INDICATORS = [
+        "session expired",
+        "please sign in",
+        "log in to continue",
+        "your session has timed out",
+        "session has ended",
+        "authentication required",
+    ]
 
     def __init__(self, headless: bool = False):
         """Initialize the scraper.
@@ -92,6 +102,13 @@ class LearningSuiteScraper:
         self.headless = headless
         self.supabase = None
         self.dynamic_base_url = None  # Set after login to include session segment (e.g., /.DaEo)
+        self._injected_cookies = []  # Store cookies for re-injection
+        self._injected_base_url = ""  # Store base URL for re-injection
+        self._local_storage = {}  # Store localStorage for re-injection
+        self._session_storage = {}  # Store sessionStorage for re-injection
+        self._last_keepalive = None  # Track last keep-alive time
+        self._session_refresh_count = 0  # Track how many times we've refreshed
+        self._max_session_refreshes = 3  # Max refreshes before giving up
         self._setup_supabase()
 
     def _setup_supabase(self):
@@ -216,12 +233,268 @@ class LearningSuiteScraper:
         options.add_argument("--log-level=3")
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
+        # Anti-detection: make headless browser look like a regular browser
+        if self.headless:
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
         logger.info("Installing/finding ChromeDriver...")
         service = Service(ChromeDriverManager().install())
         logger.info("Starting Chrome browser...")
         self.driver = webdriver.Chrome(service=service, options=options)
         self.driver.implicitly_wait(10)
+
+        # Remove webdriver flag that sites can detect
+        if self.headless:
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
         logger.info("Chrome WebDriver initialized successfully")
+
+    def inject_cookies(self, cookies: list, base_url: str,
+                       local_storage: dict = None, session_storage: dict = None) -> bool:
+        """Inject cookies from a previous session into this browser.
+
+        Used to transfer an authenticated session from a visible browser
+        to a headless browser for background scraping.
+
+        Args:
+            cookies: List of cookie dicts from driver.get_cookies()
+            base_url: The dynamic base URL (e.g., https://learningsuite.byu.edu/.DaEo)
+            local_storage: Optional localStorage data to inject
+            session_storage: Optional sessionStorage data to inject
+
+        Returns:
+            True if session is valid after injection, False otherwise
+        """
+        try:
+            # Store for potential re-injection later
+            self._injected_cookies = cookies
+            self._injected_base_url = base_url
+            self._local_storage = local_storage or {}
+            self._session_storage = session_storage or {}
+            self._last_keepalive = time.time()
+
+            # Navigate to the domain first (required to set cookies)
+            self.driver.get(self.LEARNING_SUITE_URL)
+            time.sleep(1)
+
+            # Inject each cookie - keep all fields except truly problematic ones
+            # Fields like 'expiry', 'sameSite' are important for session validity
+            injected_count = 0
+            for cookie in cookies:
+                # Only remove fields that Selenium cannot handle
+                # Keep: name, value, domain, path, secure, httpOnly, expiry, sameSite
+                fields_to_remove = {'sessionId', 'storeId'}
+                clean_cookie = {k: v for k, v in cookie.items()
+                                if k not in fields_to_remove}
+
+                # Fix sameSite value if present - Selenium requires specific casing
+                if 'sameSite' in clean_cookie:
+                    same_site = str(clean_cookie['sameSite']).capitalize()
+                    if same_site not in ('Strict', 'Lax', 'None'):
+                        del clean_cookie['sameSite']
+                    else:
+                        clean_cookie['sameSite'] = same_site
+
+                try:
+                    self.driver.add_cookie(clean_cookie)
+                    injected_count += 1
+                except Exception as e:
+                    # If adding with extra fields fails, try minimal cookie
+                    minimal_cookie = {k: v for k, v in cookie.items()
+                                      if k in ('name', 'value', 'domain', 'path', 'secure', 'httpOnly')}
+                    try:
+                        self.driver.add_cookie(minimal_cookie)
+                        injected_count += 1
+                    except Exception as e2:
+                        logger.debug(f"Skipped cookie {cookie.get('name')}: {e2}")
+
+            logger.info(f"Injected {injected_count}/{len(cookies)} cookies")
+
+            # Set the dynamic base URL
+            self.dynamic_base_url = base_url
+
+            # Inject localStorage and sessionStorage data
+            if self._local_storage:
+                self._inject_web_storage(self._local_storage, 'localStorage')
+            if self._session_storage:
+                self._inject_web_storage(self._session_storage, 'sessionStorage')
+
+            # Verify the session works by navigating to the base URL
+            self.driver.get(base_url)
+            time.sleep(2)
+
+            current_url = self.driver.current_url
+            # If we're redirected to CAS login, the session is invalid
+            if 'cas.byu.edu' in current_url:
+                logger.warning("Cookie injection failed -- redirected to CAS login")
+                return False
+
+            # Also check for Duo or other auth redirects
+            if any(x in current_url.lower() for x in ['duo', 'authenticate', 'saml', 'idp']):
+                logger.warning(f"Cookie injection failed -- redirected to auth page: {current_url}")
+                return False
+
+            # Deep verification: try navigating to student top page
+            student_url = f"{base_url}/student/top"
+            self.driver.get(student_url)
+            time.sleep(2)
+
+            current_url = self.driver.current_url
+            if 'cas.byu.edu' in current_url or 'duo' in current_url.lower():
+                logger.warning("Deep session verification failed -- redirected to login")
+                return False
+
+            # Check page content for session expiry messages
+            if not self._check_session_valid():
+                logger.warning("Session appears invalid after deep verification")
+                return False
+
+            logger.info(f"Cookie injection successful, verified at: {current_url}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Cookie injection error: {e}")
+            return False
+
+    def _inject_web_storage(self, storage_data: dict, storage_type: str):
+        """Inject localStorage or sessionStorage data into the browser.
+
+        Args:
+            storage_data: Dictionary of key-value pairs to inject
+            storage_type: Either 'localStorage' or 'sessionStorage'
+        """
+        if not storage_data:
+            return
+
+        try:
+            for key, value in storage_data.items():
+                # Escape the value for JavaScript
+                escaped_value = str(value).replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+                escaped_key = str(key).replace("\\", "\\\\").replace("'", "\\'")
+                self.driver.execute_script(
+                    f"{storage_type}.setItem('{escaped_key}', '{escaped_value}');"
+                )
+            logger.info(f"Injected {len(storage_data)} {storage_type} items")
+        except Exception as e:
+            logger.debug(f"Could not inject {storage_type}: {e}")
+
+    def _refresh_session(self) -> bool:
+        """Attempt to refresh the session by re-injecting cookies.
+
+        Called when a session expiry is detected mid-scrape.
+
+        Returns:
+            True if session was successfully refreshed, False otherwise
+        """
+        self._session_refresh_count += 1
+        if self._session_refresh_count > self._max_session_refreshes:
+            logger.error(f"Session refresh limit reached ({self._max_session_refreshes}), giving up")
+            return False
+
+        logger.warning(f"Attempting session refresh (attempt {self._session_refresh_count}/{self._max_session_refreshes})...")
+
+        if not self._injected_cookies or not self._injected_base_url:
+            logger.error("No stored cookies/URL for session refresh")
+            return False
+
+        try:
+            # Clear existing cookies
+            self.driver.delete_all_cookies()
+            time.sleep(1)
+
+            # Re-navigate to domain
+            self.driver.get(self.LEARNING_SUITE_URL)
+            time.sleep(1)
+
+            # Re-inject all cookies
+            injected = 0
+            for cookie in self._injected_cookies:
+                fields_to_remove = {'sessionId', 'storeId'}
+                clean_cookie = {k: v for k, v in cookie.items()
+                                if k not in fields_to_remove}
+
+                if 'sameSite' in clean_cookie:
+                    same_site = str(clean_cookie['sameSite']).capitalize()
+                    if same_site not in ('Strict', 'Lax', 'None'):
+                        del clean_cookie['sameSite']
+                    else:
+                        clean_cookie['sameSite'] = same_site
+
+                try:
+                    self.driver.add_cookie(clean_cookie)
+                    injected += 1
+                except Exception:
+                    minimal = {k: v for k, v in cookie.items()
+                               if k in ('name', 'value', 'domain', 'path', 'secure', 'httpOnly')}
+                    try:
+                        self.driver.add_cookie(minimal)
+                        injected += 1
+                    except Exception:
+                        pass
+
+            logger.info(f"Session refresh: re-injected {injected}/{len(self._injected_cookies)} cookies")
+
+            # Re-inject web storage
+            if self._local_storage:
+                self._inject_web_storage(self._local_storage, 'localStorage')
+            if self._session_storage:
+                self._inject_web_storage(self._session_storage, 'sessionStorage')
+
+            # Navigate to base URL and verify
+            self.driver.get(self._injected_base_url)
+            time.sleep(2)
+
+            current_url = self.driver.current_url
+            if 'cas.byu.edu' in current_url or 'duo' in current_url.lower():
+                logger.error(f"Session refresh failed -- still redirected to login: {current_url}")
+                return False
+
+            if not self._check_session_valid():
+                logger.error("Session refresh failed -- session still invalid")
+                return False
+
+            # Re-extract dynamic base URL (session segment may have changed)
+            new_base = self._extract_dynamic_base_url()
+            if new_base and new_base != self.LEARNING_SUITE_URL:
+                self.dynamic_base_url = new_base
+                logger.info(f"Session refresh: updated base URL to {new_base}")
+
+            self._last_keepalive = time.time()
+            logger.info("Session refresh successful!")
+            return True
+
+        except Exception as e:
+            logger.error(f"Session refresh error: {e}")
+            return False
+
+    def _keepalive(self):
+        """Send a keep-alive request to prevent session timeout.
+
+        Navigates to the Learning Suite home page to refresh the session timer.
+        Should be called periodically between courses during long scrapes.
+        """
+        try:
+            now = time.time()
+            # Only send keep-alive if more than 60 seconds since last one
+            if self._last_keepalive and (now - self._last_keepalive) < 60:
+                return
+
+            logger.info("Sending session keep-alive...")
+            # Touch the base URL to refresh the session timer
+            self.driver.get(f"{self._get_base_url()}/student/top")
+            time.sleep(1)
+
+            # Verify we're still logged in
+            if not self._check_session_valid():
+                logger.warning("Keep-alive detected session expiry, attempting refresh...")
+                self._refresh_session()
+            else:
+                self._last_keepalive = time.time()
+                logger.info("Keep-alive successful")
+
+        except Exception as e:
+            logger.debug(f"Keep-alive error (non-fatal): {e}")
 
     def _save_debug_html(self, label: str = ""):
         """Save current page source to debug.html for offline analysis.
@@ -304,23 +577,37 @@ class LearningSuiteScraper:
                 logger.warning("Session expired - Duo authentication required")
                 return False
 
-            # Check page content for login prompts
-            page_source = self.driver.page_source.lower()
-            if "please sign in" in page_source or "log in to continue" in page_source:
-                logger.warning("Session expired - login prompt detected")
+            # If we're on an auth/SAML page
+            if any(x in current_url.lower() for x in ["authenticate", "saml", "idp"]):
+                logger.warning("Session expired - redirected to auth page")
                 return False
+
+            # Check page content for login/session expiry messages
+            try:
+                page_source = self.driver.page_source.lower()
+                for indicator in self.SESSION_EXPIRED_INDICATORS:
+                    if indicator in page_source:
+                        logger.warning(f"Session expired - detected '{indicator}' in page")
+                        return False
+            except Exception:
+                # If we can't read page source, assume session is still valid
+                pass
 
             return True
         except Exception as e:
             logger.error(f"Error checking session: {e}")
             return False
 
-    def _safe_navigate(self, url: str, description: str = "") -> bool:
+    def _safe_navigate(self, url: str, description: str = "", retry_on_session_expire: bool = True) -> bool:
         """Safely navigate to a URL and verify the page loaded correctly.
+
+        If session has expired, attempts to refresh the session and retry
+        the navigation once.
 
         Args:
             url: The URL to navigate to
             description: Description for logging
+            retry_on_session_expire: If True, attempt session refresh on expiry
 
         Returns:
             True if navigation successful, False if error page or timeout
@@ -332,8 +619,14 @@ class LearningSuiteScraper:
 
             # Check if session is still valid (not redirected to login)
             if not self._check_session_valid():
-                logger.error("Session expired during navigation - need to re-login")
-                self._save_debug_html(f"session_expired_{description}")
+                if retry_on_session_expire:
+                    logger.warning(f"Session expired during navigation to {description}, attempting refresh...")
+                    self._save_debug_html(f"session_expired_{description}")
+                    if self._refresh_session():
+                        # Retry navigation after session refresh (without further retry)
+                        return self._safe_navigate(url, description, retry_on_session_expire=False)
+                logger.error("Session expired during navigation - could not recover")
+                self._save_debug_html(f"session_expired_final_{description}")
                 return False
 
             # Check if we landed on an error page
@@ -346,6 +639,10 @@ class LearningSuiteScraper:
             current_url = self.driver.current_url
             if "learningsuite.byu.edu" not in current_url:
                 logger.warning(f"Unexpected redirect: {current_url}")
+                if retry_on_session_expire:
+                    logger.warning("Attempting session refresh after unexpected redirect...")
+                    if self._refresh_session():
+                        return self._safe_navigate(url, description, retry_on_session_expire=False)
                 return False
 
             # Additional check - make sure we actually navigated to the expected path
@@ -482,7 +779,7 @@ class LearningSuiteScraper:
             try:
                 page_source = self.driver.page_source[:2000]
                 logger.info(f"Page source preview: {page_source[:500]}...")
-            except:
+            except (NoSuchElementException, StaleElementReferenceException):
                 pass
 
             try:
@@ -700,7 +997,7 @@ class LearningSuiteScraper:
                     href = link.get_attribute("href") or ""
                     link_text = link.text.strip()[:100] if link.text else ""
                     print(f"    [{i}] href='{href}' text='{link_text}'")
-                except:
+                except (NoSuchElementException, StaleElementReferenceException):
                     pass
             print()
 
@@ -756,6 +1053,33 @@ class LearningSuiteScraper:
             import traceback
             traceback.print_exc()
             return courses
+
+    def _extract_opens_date(self, text: str) -> Optional[str]:
+        """Extract a date from 'Opens ...' button text.
+
+        Args:
+            text: Button text like "Opens Jan 15" or "Opens Feb 3 at 8:00am"
+
+        Returns:
+            ISO format date string or None
+        """
+        if not text:
+            return None
+
+        text_lower = text.lower().strip()
+        if not text_lower.startswith("opens"):
+            return None
+
+        # Strip the "Opens" prefix
+        date_part = re.sub(r'^opens\s+', '', text, flags=re.IGNORECASE).strip()
+        if not date_part:
+            return None
+
+        # Try parsing the remaining date string
+        result = self._parse_ls_date(date_part)
+        if result:
+            return result
+        return self._parse_date(date_part)
 
     def _map_status(self, button_text: str, status_text: str = "", has_score: bool = False) -> str:
         """Map Learning Suite button/status text to CampusAI status.
@@ -879,14 +1203,14 @@ class LearningSuiteScraper:
                 try:
                     links = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     found_links.extend(links)
-                except:
+                except (NoSuchElementException, StaleElementReferenceException):
                     continue
 
             # Also find all links that match course CID pattern
             try:
                 cid_links = self.driver.find_elements(By.CSS_SELECTOR, f"a[href*='cid-{cid}']")
                 found_links.extend(cid_links)
-            except:
+            except (NoSuchElementException, StaleElementReferenceException):
                 pass
 
             # Extract unique tab URLs
@@ -985,7 +1309,7 @@ class LearningSuiteScraper:
                         print(f">>> Clicked Grades link via: {selector}")
                         time.sleep(2)
                         break
-                except:
+                except (NoSuchElementException, StaleElementReferenceException, TimeoutException):
                     continue
         except Exception as e:
             print(f">>> Could not click Grades link: {e}")
@@ -1040,7 +1364,7 @@ class LearningSuiteScraper:
                                 break
                     if assignments_view_clicked:
                         break
-                except:
+                except (NoSuchElementException, StaleElementReferenceException, TimeoutException):
                     continue
         except Exception as e:
             print(f">>> Note: Could not click Assignments sub-tab: {e}")
@@ -1110,7 +1434,7 @@ class LearningSuiteScraper:
 
                     for row in rows:
                         try:
-                            assignment = self._parse_gradebook_row(row, course_name, seen_titles)
+                            assignment = self._parse_gradebook_row(row, course_name, seen_titles, cid=cid)
                             if assignment:
                                 assignments.append(assignment)
                                 seen_titles.add(assignment["title"])
@@ -1138,13 +1462,13 @@ class LearningSuiteScraper:
                         print(f">>> Found {len(items)} items via selector: {selector}")
                         for item in items:
                             try:
-                                assignment = self._parse_gradebook_item(item, course_name, seen_titles)
+                                assignment = self._parse_gradebook_item(item, course_name, seen_titles, cid=cid)
                                 if assignment:
                                     assignments.append(assignment)
                                     seen_titles.add(assignment["title"])
-                            except:
+                            except (NoSuchElementException, StaleElementReferenceException, ValueError, TypeError):
                                 continue
-                except:
+                except (NoSuchElementException, StaleElementReferenceException):
                     continue
 
         return assignments
@@ -1198,7 +1522,7 @@ class LearningSuiteScraper:
                 json_str = re.sub(r',\s*}', '}', json_str)
                 try:
                     js_data = json.loads(json_str)
-                except:
+                except (json.JSONDecodeError, ValueError):
                     print(">>> Could not parse JSON after cleanup")
                     return assignments
 
@@ -1264,13 +1588,23 @@ class LearningSuiteScraper:
 
             # Check button text for status hints
             button_text = str(item.get("buttonText", "") or item.get("button", "")).lower()
-            if button_text in ("graded", "completed", "view"):
+            if button_text in ("graded", "completed"):
                 status = "submitted"
+            elif button_text == "view":
+                # 'view' is ambiguous — only mark submitted with corroborating evidence
+                if has_score or is_graded:
+                    status = "submitted"
             elif button_text in ("continue", "resume"):
                 status = "in_progress"
             elif button_text in ("unavailable",) or button_text.startswith("opens"):
                 status = "unavailable"
-            elif has_score or has_feedback or is_graded or is_submitted or submission_date:
+                # Extract opens date for unavailable assignments
+                if not due_date:
+                    opens_date = self._extract_opens_date(str(item.get("buttonText", "") or item.get("button", "")))
+                    if opens_date:
+                        due_date = opens_date
+            elif has_score or is_graded:
+                # Only definitive indicators of completion
                 status = "submitted"
 
             print(f"    [JS STATUS] title='{title[:30]}' score={score} feedback={has_feedback} graded={is_graded} submitted={is_submitted} button='{button_text}' -> {status}")
@@ -1296,18 +1630,18 @@ class LearningSuiteScraper:
 
             # Build the assignment URL with course ID for proper routing
             # URL format varies by assignment type:
-            # - Exams/Quizzes/Reflections: https://learningsuite.byu.edu/.vesu/cid-{cid}/student/exam/info/id-{id}
+            # - Exams/Quizzes/Reflections: https://learningsuite.byu.edu/cid-{cid}/student/exam/info/id-{id}
             # - Regular assignments: https://learningsuite.byu.edu/cid-{cid}/student/assignment/{id}
             assignment_url = None
             url_suffix = item.get("url")
             assignment_id = item.get("id")
 
             if assignment_type in ("exam", "quiz"):
-                # Exams and quizzes use a different URL format with .vesu prefix
+                # Exams and quizzes use the exam info URL (no session segment — it expires)
                 if assignment_id:
-                    assignment_url = f"{self.LEARNING_SUITE_URL}/.vesu/cid-{cid}/student/exam/info/id-{assignment_id}"
+                    assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/exam/info/id-{assignment_id}"
                 elif url_suffix:
-                    assignment_url = f"{self.LEARNING_SUITE_URL}/.vesu/cid-{cid}/student/exam/info/id-{url_suffix}"
+                    assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/exam/info/id-{url_suffix}"
             else:
                 # Regular assignments
                 if url_suffix:
@@ -1374,13 +1708,38 @@ class LearningSuiteScraper:
         # Remove day of week prefix
         date_str = re.sub(r'^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*', '', date_str, flags=re.IGNORECASE)
 
+        # Normalize whitespace and common variations
+        date_str = re.sub(r'\s+', ' ', date_str).strip()
+        # "at" is sometimes missing or replaced with comma
+        date_str = re.sub(r',\s*(\d{1,2}:\d{2})', r' at \1', date_str)
+
         # Try parsing
         formats = [
+            # With "at" separator
             "%b %d at %I:%M%p",      # "Jan 29 at 12:30pm"
             "%b %d at %I:%M %p",     # "Jan 29 at 12:30 pm"
             "%B %d at %I:%M%p",      # "January 29 at 12:30pm"
             "%B %d at %I:%M %p",     # "January 29 at 12:30 pm"
             "%b %d, %Y at %I:%M%p",  # "Jan 29, 2026 at 12:30pm"
+            "%b %d, %Y at %I:%M %p", # "Jan 29, 2026 at 12:30 pm"
+            "%B %d, %Y at %I:%M%p",  # "January 29, 2026 at 12:30pm"
+            "%B %d, %Y at %I:%M %p", # "January 29, 2026 at 12:30 pm"
+            # Without "at" separator
+            "%b %d %I:%M%p",         # "Jan 29 12:30pm"
+            "%b %d %I:%M %p",        # "Jan 29 12:30 pm"
+            "%B %d %I:%M%p",         # "January 29 12:30pm"
+            "%B %d %I:%M %p",        # "January 29 12:30 pm"
+            # Date only (no time)
+            "%b %d, %Y",             # "Jan 29, 2026"
+            "%B %d, %Y",             # "January 29, 2026"
+            "%b %d",                 # "Jan 29"
+            "%B %d",                 # "January 29"
+            # With period abbreviation
+            "%b. %d at %I:%M%p",     # "Jan. 29 at 12:30pm"
+            "%b. %d at %I:%M %p",    # "Jan. 29 at 12:30 pm"
+            "%b. %d, %Y at %I:%M%p", # "Jan. 29, 2026 at 12:30pm"
+            "%b. %d, %Y",            # "Jan. 29, 2026"
+            "%b. %d",                # "Jan. 29"
         ]
 
         current_year = datetime.now().year
@@ -1391,6 +1750,9 @@ class LearningSuiteScraper:
                 # Add year if not present (defaults to 1900)
                 if dt.year == 1900:
                     dt = dt.replace(year=current_year)
+                # If no time specified, set to 11:59 PM
+                if dt.hour == 0 and dt.minute == 0 and "%I" not in fmt and "%H" not in fmt:
+                    dt = dt.replace(hour=23, minute=59)
                 dt = dt.replace(tzinfo=mountain)
                 return dt.isoformat()
             except ValueError:
@@ -1399,13 +1761,14 @@ class LearningSuiteScraper:
         # Fall back to the general date parser
         return self._parse_date(date_str)
 
-    def _parse_gradebook_row(self, row, course_name: str, seen_titles: set) -> Optional[dict]:
+    def _parse_gradebook_row(self, row, course_name: str, seen_titles: set, cid: str = None) -> Optional[dict]:
         """Parse a single row from the gradebook table.
 
         Args:
             row: Selenium element representing the row
             course_name: Name of the course
             seen_titles: Set of already seen titles to avoid duplicates
+            cid: Learning Suite course ID for URL construction
 
         Returns:
             Assignment dictionary or None
@@ -1454,8 +1817,10 @@ class LearningSuiteScraper:
                 if not cell_text:
                     continue
 
-                # Check for score patterns (85/100, 95%, A, etc.)
-                if re.match(r'^\d+(\.\d+)?(/\d+)?%?$', cell_text) or re.match(r'^[A-F][+-]?$', cell_text):
+                # Check for score patterns (85/100, 95%, A, 85 / 100, etc.)
+                if re.match(r'^\d+(\.\d+)?\s*/\s*\d+(\.\d+)?%?$', cell_text) or \
+                   re.match(r'^\d+(\.\d+)?%?$', cell_text) or \
+                   re.match(r'^[A-F][+-]?$', cell_text):
                     has_score = True
                     continue
 
@@ -1483,7 +1848,7 @@ class LearningSuiteScraper:
                         button_text = link.text.strip()
                         try:
                             assignment_url = link.get_attribute("href")
-                        except:
+                        except (StaleElementReferenceException, NoSuchElementException):
                             pass
                         continue
                 except NoSuchElementException:
@@ -1514,7 +1879,7 @@ class LearningSuiteScraper:
                             href = link.get_attribute("href")
                             if href and ("assignment" in href or "exam" in href or "quiz" in href or "cid-" in href):
                                 assignment_url = href
-                        except:
+                        except (NoSuchElementException, StaleElementReferenceException):
                             pass
 
             # Validate we have a title
@@ -1531,6 +1896,12 @@ class LearningSuiteScraper:
             elif button_text:
                 status = self._map_status(button_text, has_score=has_score)
 
+            # Extract opens date for unavailable assignments
+            if status == "unavailable" and not due_date and button_text:
+                opens_date = self._extract_opens_date(button_text)
+                if opens_date:
+                    due_date = opens_date
+
             # Infer assignment type
             assignment_type = self._infer_assignment_type(title, button_text)
 
@@ -1545,12 +1916,13 @@ class LearningSuiteScraper:
                 "status": status,
                 "assignment_type": assignment_type,
                 "button_text": button_text,
+                "ls_cid": cid,
             }
 
         except Exception as e:
             return None
 
-    def _parse_gradebook_item(self, item, course_name: str, seen_titles: set) -> Optional[dict]:
+    def _parse_gradebook_item(self, item, course_name: str, seen_titles: set, cid: str = None) -> Optional[dict]:
         """Parse a gradebook item from a div/list-based layout.
 
         Args:
@@ -1592,7 +1964,7 @@ class LearningSuiteScraper:
                             button_text = link_text
                             if not assignment_url:
                                 assignment_url = href
-            except:
+            except (NoSuchElementException, StaleElementReferenceException):
                 pass
 
             # Extract title from text if not found via links
@@ -1633,6 +2005,7 @@ class LearningSuiteScraper:
                 "status": status,
                 "assignment_type": assignment_type,
                 "button_text": button_text,
+                "ls_cid": cid,
             }
 
         except Exception as e:
@@ -1679,7 +2052,7 @@ class LearningSuiteScraper:
                     try:
                         link = header.find_element(By.TAG_NAME, "a")
                         assignment_url = link.get_attribute("href")
-                    except:
+                    except (NoSuchElementException, StaleElementReferenceException):
                         pass
 
                     # Infer type from title
@@ -1699,7 +2072,7 @@ class LearningSuiteScraper:
                     })
                     seen_titles.add(text)
 
-                except:
+                except (NoSuchElementException, StaleElementReferenceException, ValueError, TypeError):
                     continue
 
         except Exception as e:
@@ -1768,7 +2141,7 @@ class LearningSuiteScraper:
                             })
                             seen_titles.add(text)
 
-                except:
+                except (NoSuchElementException, StaleElementReferenceException):
                     continue
 
         except Exception as e:
@@ -1844,7 +2217,7 @@ class LearningSuiteScraper:
             for i, row in enumerate(rows):
                 try:
                     print(f"\n--- Processing exam row {i+1}/{len(rows)} ---")
-                    assignment = self._parse_assignment_row(row, course_name, is_exam=True)
+                    assignment = self._parse_assignment_row(row, course_name, is_exam=True, cid=cid)
                     if assignment:
                         assignments.append(assignment)
                         print(f"    [ADDED] Exam added to list")
@@ -1913,7 +2286,7 @@ class LearningSuiteScraper:
             try:
                 page_header = self.driver.find_element(By.CSS_SELECTOR, "h1, .course-title, .page-title, header")
                 print(f">>> PAGE HEADER TEXT: '{page_header.text[:200]}'")
-            except:
+            except (NoSuchElementException, StaleElementReferenceException):
                 pass
 
             # DIAGNOSTIC: Check current URL to confirm we're on the right course
@@ -1937,7 +2310,7 @@ class LearningSuiteScraper:
             for i, row in enumerate(rows):
                 try:
                     print(f"\n--- Processing assignment row {i+1}/{len(rows)} ---")
-                    assignment = self._parse_assignment_row(row, course_name, is_exam=False)
+                    assignment = self._parse_assignment_row(row, course_name, is_exam=False, cid=cid)
                     if assignment:
                         assignments.append(assignment)
                         print(f"    [ADDED] Assignment added to list")
@@ -2041,7 +2414,7 @@ class LearningSuiteScraper:
                         )
                         if date_match:
                             due_date = self._parse_date(date_match.group(1))
-                    except:
+                    except (NoSuchElementException, StaleElementReferenceException, ValueError, TypeError):
                         pass
 
                     assignment_type = self._infer_assignment_type(title, "")
@@ -2132,7 +2505,7 @@ class LearningSuiteScraper:
             for i, row in enumerate(rows):
                 try:
                     print(f"\n--- Processing schedule row {i+1}/{len(rows)} ---")
-                    assignment = self._parse_assignment_row(row, course_name, is_exam=False)
+                    assignment = self._parse_assignment_row(row, course_name, is_exam=False, cid=cid)
                     if assignment:
                         assignments.append(assignment)
                         print(f"    [ADDED] Schedule item added to list")
@@ -2155,7 +2528,7 @@ class LearningSuiteScraper:
 
         return assignments
 
-    def _parse_assignment_row(self, row, course_name: str, is_exam: bool = False) -> Optional[dict]:
+    def _parse_assignment_row(self, row, course_name: str, is_exam: bool = False, cid: str = None) -> Optional[dict]:
         """Parse a single assignment row.
 
         Args:
@@ -2199,7 +2572,7 @@ class LearningSuiteScraper:
                     cell_html = ""
                     try:
                         cell_html = cell.get_attribute("innerHTML")[:200] if cell.get_attribute("innerHTML") else ""
-                    except:
+                    except (StaleElementReferenceException, NoSuchElementException):
                         pass
 
                     # DIAGNOSTIC: Print ALL cells including empty ones to see structure
@@ -2236,7 +2609,7 @@ class LearningSuiteScraper:
                                 print(f"        -> BUTTON FOUND: '{button_text}'")
                                 try:
                                     assignment_url = button_or_link.get_attribute("href")
-                                except:
+                                except (StaleElementReferenceException, NoSuchElementException):
                                     pass
                                 continue
                         except NoSuchElementException:
@@ -2300,7 +2673,7 @@ class LearningSuiteScraper:
                                     assignment_url = href
                                     print(f"    [FALLBACK LINK] Found: {href}")
                                     break
-                    except:
+                    except (NoSuchElementException, StaleElementReferenceException):
                         pass
 
             else:
@@ -2353,7 +2726,7 @@ class LearningSuiteScraper:
                                 "cid-" in href):
                                 assignment_url = href
                                 break
-                except:
+                except (NoSuchElementException, StaleElementReferenceException):
                     pass
 
             # Validate title - skip if it's empty or just a button word
@@ -2392,6 +2765,7 @@ class LearningSuiteScraper:
                 "status": status,
                 "assignment_type": assignment_type,
                 "button_text": button_text,
+                "ls_cid": cid,
             }
 
         except Exception as e:
@@ -2417,35 +2791,71 @@ class LearningSuiteScraper:
         # Get current year for dates without year
         current_year = datetime.now().year
 
+        # Normalize whitespace
+        date_str = re.sub(r'\s+', ' ', date_str).strip()
+        # Remove "Due:" or "Due " prefix
+        date_str = re.sub(r'^Due:?\s*', '', date_str, flags=re.IGNORECASE).strip()
+        # Remove day of week prefix (in case _parse_date called directly)
+        date_str = re.sub(r'^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*', '', date_str, flags=re.IGNORECASE)
+
         # Expanded date formats - trying more variations
         date_formats = [
             # Learning Suite format WITHOUT year: "Jan 11 11:59 pm"
             "%b %d %I:%M %p",
             "%b %d %I:%M%p",  # No space before AM/PM
+            "%B %d %I:%M %p",
+            "%B %d %I:%M%p",
 
-            # Full month name formats
+            # With "at" separator, no year
+            "%b %d at %I:%M %p",
+            "%b %d at %I:%M%p",
+            "%B %d at %I:%M %p",
+            "%B %d at %I:%M%p",
+
+            # Full month name formats WITH year
             "%B %d, %Y at %I:%M %p",
+            "%B %d, %Y at %I:%M%p",
             "%B %d, %Y %I:%M %p",
+            "%B %d, %Y %I:%M%p",
             "%B %d %Y at %I:%M %p",
             "%B %d %Y %I:%M %p",
             "%B %d, %Y",
             "%B %d %Y",
+
             # Abbreviated month name formats WITH year
             "%b %d, %Y at %I:%M %p",
+            "%b %d, %Y at %I:%M%p",
             "%b %d, %Y %I:%M %p",
+            "%b %d, %Y %I:%M%p",
             "%b %d %Y at %I:%M %p",
             "%b %d %Y %I:%M %p",
             "%b %d, %Y",
             "%b %d %Y",
-            "%b. %d, %Y",  # Jan. 15, 2024
+
+            # With period abbreviation (Jan. 15)
+            "%b. %d, %Y at %I:%M %p",
+            "%b. %d, %Y at %I:%M%p",
+            "%b. %d, %Y %I:%M %p",
+            "%b. %d, %Y",
             "%b. %d %Y",
+            "%b. %d at %I:%M %p",
+            "%b. %d at %I:%M%p",
+            "%b. %d %I:%M %p",
+            "%b. %d %I:%M%p",
+            "%b. %d",
+
+            # Date only (no year, no time)
+            "%b %d",
+            "%B %d",
+
             # Numeric formats
             "%m/%d/%Y %I:%M %p",
-            "%m/%d/%Y %I:%M%p",  # No space before AM/PM
+            "%m/%d/%Y %I:%M%p",
             "%m/%d/%Y",
             "%m/%d/%y %I:%M %p",
             "%m/%d/%y %I:%M%p",
             "%m/%d/%y",
+
             # ISO-like formats
             "%Y-%m-%d",
             "%Y-%m-%dT%H:%M:%S",
@@ -2490,11 +2900,23 @@ class LearningSuiteScraper:
         print(f"           [DATE PARSE FAILED] Could not parse: '{original_str}'")
         return None
 
-    def scrape_all_courses(self) -> list[dict]:
+    def scrape_all_courses(self, progress_callback=None, save_per_course=False) -> list[dict]:
         """Scrape assignments from all enrolled courses.
 
-        Primary strategy: Use Grades → Assignments view which contains ALL
+        Primary strategy: Use Grades -> Assignments view which contains ALL
         gradable items (quizzes, exams, projects, readings, etc.)
+
+        Includes session resilience:
+        - Keep-alive requests between courses to prevent session timeout
+        - Session validity checks before each course
+        - Automatic session refresh/retry on failure
+        - Tracks remaining courses so a failed course can be retried
+
+        Args:
+            progress_callback: Optional callable(current_index, total_courses, course_name)
+                called after each course is scraped for progress reporting.
+            save_per_course: If True, call update_database() after each course
+                so assignments appear incrementally in the frontend.
 
         Returns:
             List of all assignments across all courses
@@ -2506,23 +2928,68 @@ class LearningSuiteScraper:
             logger.warning("No courses found to scrape")
             return all_assignments
 
+        total_courses = len(courses)
+        if progress_callback:
+            progress_callback(0, total_courses, "Starting...")
+
         # Track totals per course for summary
         course_totals = {}
+        # Track per-course DB results when save_per_course is enabled
+        self._per_course_db_results = []
+        # Track failed courses for potential retry
+        failed_courses = []
 
-        for course in courses:
+        for i, course in enumerate(courses):
             course_assignments = []
             existing_titles = set()
 
             print(f"\n{'#' * 70}")
-            print(f"### PROCESSING COURSE: {course['name']}")
+            print(f"### PROCESSING COURSE: {course['name']} ({i+1}/{total_courses})")
             print(f"{'#' * 70}")
 
-            # PRIMARY SOURCE: Grades → Assignments view
+            # SESSION CHECK: Before each course, verify session is still valid
+            if not self._check_session_valid():
+                logger.warning(f"Session invalid before scraping {course['name']}, attempting refresh...")
+                if not self._refresh_session():
+                    logger.error(f"Session refresh failed before {course['name']}, adding to retry queue")
+                    failed_courses.append((i, course))
+                    if progress_callback:
+                        progress_callback(i + 1, total_courses, f"{course['name']} (session error)")
+                    continue
+
+            # KEEP-ALIVE: Touch the base URL periodically to refresh session timer
+            # Do this every 2 courses to stay well within session timeout
+            if i > 0 and i % 2 == 0:
+                self._keepalive()
+
+            # PRIMARY SOURCE: Grades -> Assignments view
             # This should contain ALL gradable items including quizzes, exams, projects, etc.
-            grades_assignments = self.scrape_grades_assignments_view(course)
-            for a in grades_assignments:
-                course_assignments.append(a)
-                existing_titles.add(a["title"])
+            grades_assignments = []
+            try:
+                grades_assignments = self.scrape_grades_assignments_view(course)
+                for a in grades_assignments:
+                    course_assignments.append(a)
+                    existing_titles.add(a["title"])
+            except Exception as e:
+                logger.error(f"Error scraping grades view for {course['name']}: {e}")
+                # Check if this was a session error
+                if not self._check_session_valid():
+                    logger.warning(f"Session expired during {course['name']}, attempting refresh...")
+                    if self._refresh_session():
+                        # Retry this course after session refresh
+                        try:
+                            grades_assignments = self.scrape_grades_assignments_view(course)
+                            for a in grades_assignments:
+                                course_assignments.append(a)
+                                existing_titles.add(a["title"])
+                        except Exception as retry_e:
+                            logger.error(f"Retry failed for {course['name']}: {retry_e}")
+                            failed_courses.append((i, course))
+                    else:
+                        failed_courses.append((i, course))
+                        if progress_callback:
+                            progress_callback(i + 1, total_courses, f"{course['name']} (failed)")
+                        continue
 
             time.sleep(1)
 
@@ -2530,12 +2997,15 @@ class LearningSuiteScraper:
             # This catches cases where exams are listed separately
             if len(grades_assignments) < 5:
                 print(f">>> Grades view found only {len(grades_assignments)} items, checking Exams tab...")
-                exams_assignments = self.scrape_exams_tab(course)
-                for exam in exams_assignments:
-                    if exam["title"] not in existing_titles:
-                        course_assignments.append(exam)
-                        existing_titles.add(exam["title"])
-                        print(f"    [NEW FROM EXAMS] {exam['title']}")
+                try:
+                    exams_assignments = self.scrape_exams_tab(course)
+                    for exam in exams_assignments:
+                        if exam["title"] not in existing_titles:
+                            course_assignments.append(exam)
+                            existing_titles.add(exam["title"])
+                            print(f"    [NEW FROM EXAMS] {exam['title']}")
+                except Exception as e:
+                    logger.error(f"Error scraping exams tab for {course['name']}: {e}")
 
                 time.sleep(1)
 
@@ -2545,7 +3015,69 @@ class LearningSuiteScraper:
             print(f"\n>>> COURSE COMPLETE: {course['name']}")
             print(f">>> Total assignments found: {len(course_assignments)}")
 
+            # Save this course's assignments to DB immediately if requested
+            if save_per_course and course_assignments:
+                db_result = self.update_database(course_assignments)
+                self._per_course_db_results.append(db_result)
+
             all_assignments.extend(course_assignments)
+
+            # Report progress after each course
+            if progress_callback:
+                progress_callback(i + 1, total_courses, course['name'])
+
+        # RETRY FAILED COURSES: If any courses failed due to session issues, retry them
+        if failed_courses:
+            logger.info(f"Retrying {len(failed_courses)} failed courses...")
+            print(f"\n{'=' * 70}")
+            print(f"RETRYING {len(failed_courses)} FAILED COURSES")
+            print(f"{'=' * 70}")
+
+            # First, try to refresh the session
+            if self._check_session_valid() or self._refresh_session():
+                for original_idx, course in failed_courses:
+                    print(f"\n### RETRY: {course['name']}")
+                    course_assignments = []
+                    existing_titles = set()
+
+                    if not self._check_session_valid():
+                        logger.error(f"Session still invalid, skipping retry for {course['name']}")
+                        continue
+
+                    try:
+                        grades_assignments = self.scrape_grades_assignments_view(course)
+                        for a in grades_assignments:
+                            course_assignments.append(a)
+                            existing_titles.add(a["title"])
+
+                        if len(grades_assignments) < 5:
+                            try:
+                                exams_assignments = self.scrape_exams_tab(course)
+                                for exam in exams_assignments:
+                                    if exam["title"] not in existing_titles:
+                                        course_assignments.append(exam)
+                                        existing_titles.add(exam["title"])
+                            except Exception:
+                                pass
+
+                        course_totals[course['name']] = len(course_assignments)
+                        print(f">>> RETRY COMPLETE: {course['name']} - {len(course_assignments)} assignments")
+
+                        if save_per_course and course_assignments:
+                            db_result = self.update_database(course_assignments)
+                            self._per_course_db_results.append(db_result)
+
+                        all_assignments.extend(course_assignments)
+
+                    except Exception as e:
+                        logger.error(f"Retry failed for {course['name']}: {e}")
+                        course_totals[course['name']] = 0
+
+                    time.sleep(1)
+            else:
+                logger.error("Cannot refresh session for retry, skipping failed courses")
+                for _, course in failed_courses:
+                    course_totals[course['name']] = 0
 
         # Print final summary with totals per course
         print("\n" + "=" * 70)
@@ -2553,6 +3085,12 @@ class LearningSuiteScraper:
         print("=" * 70)
         for course_name, count in course_totals.items():
             print(f"  {course_name}: {count} assignments")
+        if failed_courses:
+            print(f"\n  COURSES THAT FAILED: {len(failed_courses)}")
+            for _, course in failed_courses:
+                final_count = course_totals.get(course['name'], 0)
+                status = f"{final_count} assignments (recovered)" if final_count > 0 else "FAILED"
+                print(f"    - {course['name']}: {status}")
         print("-" * 70)
         print(f"  TOTAL: {len(all_assignments)} assignments")
         print("=" * 70)
@@ -2585,7 +3123,8 @@ class LearningSuiteScraper:
             try:
                 # Sanitize URL to remove session segment (prevents error pages)
                 raw_link = assignment.get("link")
-                sanitized_link = self._sanitize_url(raw_link) if raw_link else None
+                cid = assignment.get("ls_cid")
+                sanitized_link = self._sanitize_url(raw_link, cid=cid) if raw_link else None
                 assignment["link"] = sanitized_link
 
                 # Clean description (remove HTML tags and entities)
@@ -2639,12 +3178,15 @@ class LearningSuiteScraper:
                     # Update status only for these transitions:
                     # - anything -> submitted (user completed it)
                     # - unavailable -> not_started (became available)
+                    # - newly_assigned stays unless LS shows definitive state
                     if ls_status == "submitted" and current_status != "submitted":
                         update_data["status"] = "submitted"
                     elif ls_status == "not_started" and current_status == "unavailable":
                         update_data["status"] = "not_started"
-                    elif ls_status == "in_progress" and current_status == "not_started":
+                    elif ls_status == "in_progress" and current_status in ("not_started", "newly_assigned"):
                         update_data["status"] = "in_progress"
+                    elif ls_status == "unavailable" and current_status == "newly_assigned":
+                        update_data["status"] = "unavailable"
 
                     # Update due date if changed
                     if is_modified and assignment.get("due_date"):
@@ -2664,13 +3206,17 @@ class LearningSuiteScraper:
 
                 else:
                     # Insert new assignment
+                    # Use scraper status for definitive states, otherwise newly_assigned
+                    scraped_status = assignment.get("status", "not_started")
+                    insert_status = scraped_status if scraped_status in ("submitted", "in_progress", "unavailable") else "newly_assigned"
+
                     new_record = {
                         "title": assignment["title"],
                         "course_name": assignment["course_name"],
                         "due_date": assignment.get("due_date"),
                         "description": assignment.get("description"),
                         "link": assignment.get("link"),
-                        "status": assignment.get("status", "not_started"),
+                        "status": insert_status,
                         "is_modified": False,
                         "last_scraped_at": now,
                         "learning_suite_url": assignment.get("link"),

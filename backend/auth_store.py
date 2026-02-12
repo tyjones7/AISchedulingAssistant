@@ -42,6 +42,14 @@ _browser_auth_lock = threading.Lock()
 _authenticated_scraper = None
 _is_authenticated = False
 
+# Session data for headless scraping (cookies + URL extracted from visible browser)
+_session_cookies: list = []
+_dynamic_base_url: str = ""
+
+# Web storage data (localStorage/sessionStorage) for session persistence
+_local_storage: dict = {}
+_session_storage: dict = {}
+
 
 def create_browser_auth_task() -> str:
     """Create a new browser auth task.
@@ -82,6 +90,48 @@ def set_authenticated(scraper=None):
     _is_authenticated = True
 
 
+def set_session_data(cookies: list, dynamic_base_url: str):
+    """Store session cookies and URL for headless scraping.
+
+    Called after visible browser login succeeds. The visible browser is then closed,
+    and these cookies are injected into a headless browser when sync starts.
+    """
+    global _session_cookies, _dynamic_base_url, _is_authenticated, _authenticated_scraper
+    _session_cookies = cookies
+    _dynamic_base_url = dynamic_base_url
+    _is_authenticated = True
+    _authenticated_scraper = None  # No live scraper — we use cookies instead
+
+
+def set_web_storage(local_storage: dict, session_storage: dict):
+    """Store localStorage and sessionStorage data from the visible browser.
+
+    Some sites use web storage for session validation alongside cookies.
+    This data is injected into the headless browser along with cookies.
+    """
+    global _local_storage, _session_storage
+    _local_storage = local_storage or {}
+    _session_storage = session_storage or {}
+
+
+def get_web_storage() -> tuple:
+    """Get stored localStorage and sessionStorage data.
+
+    Returns:
+        Tuple of (local_storage dict, session_storage dict)
+    """
+    return _local_storage, _session_storage
+
+
+def get_session_data() -> tuple:
+    """Get stored session cookies and dynamic base URL.
+
+    Returns:
+        Tuple of (cookies list, dynamic_base_url string)
+    """
+    return _session_cookies, _dynamic_base_url
+
+
 def get_authenticated_scraper():
     """Get the authenticated scraper if available."""
     return _authenticated_scraper
@@ -94,7 +144,8 @@ def is_authenticated() -> bool:
 
 def clear_authentication():
     """Clear authentication state."""
-    global _authenticated_scraper, _is_authenticated
+    global _authenticated_scraper, _is_authenticated, _session_cookies, _dynamic_base_url
+    global _local_storage, _session_storage
     if _authenticated_scraper:
         try:
             _authenticated_scraper.close()
@@ -102,3 +153,7 @@ def clear_authentication():
             pass
     _authenticated_scraper = None
     _is_authenticated = False
+    _session_cookies = []
+    _dynamic_base_url = ""
+    _local_storage = {}
+    _session_storage = {}

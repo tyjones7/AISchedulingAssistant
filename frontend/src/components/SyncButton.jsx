@@ -18,7 +18,7 @@ const STATUS_MESSAGES = {
 // Log API_BASE on load for debugging
 console.log('[SyncButton] API_BASE configured as:', API_BASE)
 
-function SyncButton({ onSyncComplete, triggerSync, onSyncStarted }) {
+function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress }) {
   const [syncing, setSyncing] = useState(false)
   const [taskId, setTaskId] = useState(null)
   const [status, setStatus] = useState(null)
@@ -81,6 +81,10 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted }) {
         const data = await response.json()
         console.log('[SyncButton] Status response:', data)
         setStatus(data)
+
+        if (onSyncProgress) {
+          onSyncProgress(data)
+        }
 
         if (data.status === 'completed') {
           setSyncing(false)

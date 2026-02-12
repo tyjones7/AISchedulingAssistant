@@ -25,75 +25,100 @@ function AssignmentCard({
   isUpdating,
   compact = false,
 }) {
-  const formatDueDate = (dateString) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    const dueDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const tz = 'America/Denver'
 
-    const timeStr = date.toLocaleTimeString('en-US', {
+  const getMtDateStr = (d) => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(d)
+    return `${parts.find(p => p.type === 'year').value}-${parts.find(p => p.type === 'month').value}-${parts.find(p => p.type === 'day').value}`
+  }
+
+  // Time remaining calculation
+  const getTimeRemaining = (dateString) => {
+    const due = new Date(dateString)
+    const now = new Date()
+    const diff = due - now
+
+    if (diff < 0) {
+      // Overdue
+      const absDiff = Math.abs(diff)
+      const hours = Math.floor(absDiff / 3600000)
+      const days = Math.floor(hours / 24)
+      if (days > 0) return `${days}d overdue`
+      if (hours > 0) return `${hours}h overdue`
+      return 'Just passed'
+    }
+
+    const minutes = Math.floor(diff / 60000)
+    const hours = Math.floor(diff / 3600000)
+    const days = Math.floor(hours / 24)
+
+    if (days > 7) return `${Math.floor(days / 7)}w ${days % 7}d left`
+    if (days > 0) return `${days}d ${hours % 24}h left`
+    if (hours > 0) return `${hours}h ${minutes % 60}m left`
+    return `${minutes}m left`
+  }
+
+  // Urgency level for visual indicators
+  const getUrgencyLevel = (dateString) => {
+    const due = new Date(dateString)
+    const now = new Date()
+    const diff = due - now
+
+    if (diff < 0) return 'overdue'
+
+    const todayStr = getMtDateStr(now)
+    const dueDateStr = getMtDateStr(due)
+
+    if (dueDateStr === todayStr) return 'today'
+
+    const tomorrowStr = getMtDateStr(new Date(now.getTime() + 86400000))
+    if (dueDateStr === tomorrowStr) return 'tomorrow'
+
+    const hours = diff / 3600000
+    if (hours < 72) return 'soon'
+
+    return 'later'
+  }
+
+  const formatDueTime = (dateString) => {
+    const date = new Date(dateString)
+    return date.toLocaleTimeString('en-US', {
+      timeZone: tz,
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
     })
+  }
 
-    if (dueDay.getTime() === today.getTime()) {
+  const formatDueDate = (dateString) => {
+    const date = new Date(dateString)
+    const now = new Date()
+
+    const dueDateStr = getMtDateStr(date)
+    const todayStr = getMtDateStr(now)
+    const tomorrowStr = getMtDateStr(new Date(now.getTime() + 86400000))
+
+    const timeStr = formatDueTime(dateString)
+
+    if (dueDateStr === todayStr) {
       return `Today at ${timeStr}`
-    } else if (dueDay.getTime() === tomorrow.getTime()) {
+    } else if (dueDateStr === tomorrowStr) {
       return `Tomorrow at ${timeStr}`
     }
 
     return date.toLocaleDateString('en-US', {
+      timeZone: tz,
       weekday: 'short',
       month: 'short',
       day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    }).replace(',', ' at')
+    }) + ` at ${timeStr}`
   }
 
-  const formatPlannedTime = (startStr, endStr) => {
-    if (!startStr) return null
-
-    const start = new Date(startStr)
-    const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate())
-
-    const startTime = start.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-
-    let dayLabel
-    if (startDay.getTime() === today.getTime()) {
-      dayLabel = 'Today'
-    } else if (startDay.getTime() === tomorrow.getTime()) {
-      dayLabel = 'Tomorrow'
-    } else {
-      dayLabel = start.toLocaleDateString('en-US', { weekday: 'short' })
-    }
-
-    if (endStr) {
-      const end = new Date(endStr)
-      const endTime = end.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      })
-      return `${dayLabel} ${startTime}–${endTime}`
-    }
-
-    return `${dayLabel} ${startTime}`
-  }
-
-  const isPastDue = new Date(assignment.due_date) < new Date() && assignment.status !== 'submitted'
+  const isPastDue = assignment.due_date && new Date(assignment.due_date) < new Date() && assignment.status !== 'submitted'
+  const urgency = assignment.due_date ? getUrgencyLevel(assignment.due_date) : 'later'
+  const timeRemaining = assignment.due_date ? getTimeRemaining(assignment.due_date) : null
 
   const handleStatusChange = (e) => {
     e.stopPropagation()
@@ -104,7 +129,6 @@ function AssignmentCard({
   }
 
   const handleCardClick = (e) => {
-    // Don't open detail if clicking on interactive elements
     if (
       e.target.closest('.quick-action-btn') ||
       e.target.closest('.status-select') ||
@@ -120,68 +144,70 @@ function AssignmentCard({
   const canMarkStarted = ['newly_assigned', 'not_started'].includes(assignment.status)
   const canMarkDone = ['newly_assigned', 'not_started', 'in_progress'].includes(assignment.status)
 
-  const plannedTime = formatPlannedTime(assignment.planned_start, assignment.planned_end)
-
   const cardClasses = [
     'assignment-card',
     isUpdating && 'is-updating',
     compact && 'is-compact',
-    isPastDue && 'is-overdue-card',
     onOpenDetail && 'is-clickable',
+    `urgency-${urgency}`,
   ].filter(Boolean).join(' ')
 
   return (
     <article className={cardClasses} onClick={handleCardClick}>
-      <div className="card-header">
-        <div className="card-title-section">
-          <h3 className="assignment-title">{assignment.title}</h3>
-          <div className="card-meta">
-            <span className="course-badge">{assignment.course_name}</span>
-            <span className={`status-badge status-${assignment.status}`}>
-              <span className="status-dot" />
-              {STATUS_LABELS[assignment.status]}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="card-times">
-        <p className={`due-date ${isPastDue ? 'is-overdue' : ''}`}>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-          </svg>
-          {isPastDue && <span className="overdue-label">Overdue:</span>}
-          <span>{formatDueDate(assignment.due_date)}</span>
-        </p>
-
-        {plannedTime && (
-          <p className="planned-time">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-            <span>Planned: {plannedTime}</span>
-          </p>
+      {/* Top row: title + time remaining */}
+      <div className="card-top">
+        <h3 className="card-title">{assignment.title}</h3>
+        {timeRemaining && (
+          <span className={`time-remaining time-${urgency}`}>
+            {timeRemaining}
+          </span>
         )}
       </div>
 
-      {!compact && assignment.description && (
-        <p className="assignment-description">{assignment.description}</p>
+      {/* Meta row: course + status + estimated time */}
+      <div className="card-meta">
+        <span className="card-course">{assignment.course_name}</span>
+        <span className={`card-status status-${assignment.status}`}>
+          {STATUS_LABELS[assignment.status]}
+        </span>
+        {assignment.estimated_minutes && (
+          <span className="card-estimate">
+            ~{assignment.estimated_minutes >= 60
+              ? `${Math.floor(assignment.estimated_minutes / 60)}h ${assignment.estimated_minutes % 60 > 0 ? (assignment.estimated_minutes % 60) + 'm' : ''}`
+              : `${assignment.estimated_minutes}m`
+            }
+          </span>
+        )}
+      </div>
+
+      {/* Due date (non-compact only) */}
+      {!compact && (
+        <div className="card-due">
+          {assignment.due_date ? (
+            <span className={`due-text ${isPastDue ? 'is-overdue' : ''}`}>
+              {formatDueDate(assignment.due_date)}
+            </span>
+          ) : (
+            <span className="due-text no-date">No due date</span>
+          )}
+        </div>
       )}
 
-      <div className="card-footer">
-        {/* Quick Actions */}
-        <div className="quick-actions">
+      {/* Description (non-compact only) */}
+      {!compact && assignment.description && (
+        <p className="card-description">{assignment.description}</p>
+      )}
+
+      {/* Actions */}
+      <div className="card-actions">
+        <div className="action-buttons">
           {assignment.link && (
             <a
               href={assignment.link}
               target="_blank"
               rel="noopener noreferrer"
               className="quick-action-btn action-open"
-              title="Open assignment"
+              title="Open in Learning Suite"
               onClick={(e) => e.stopPropagation()}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -228,7 +254,6 @@ function AssignmentCard({
           )}
         </div>
 
-        {/* Status Dropdown */}
         <div className="status-controls">
           <select
             className="status-select"

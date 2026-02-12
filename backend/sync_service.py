@@ -47,6 +47,9 @@ class SyncTask:
         self.assignments_added = 0
         self.assignments_updated = 0
         self.courses_scraped = 0
+        self.total_courses = 0
+        self.current_course = 0
+        self.current_course_name = ""
 
 
 class SyncService:
@@ -131,6 +134,9 @@ class SyncService:
             "assignments_added": task.assignments_added,
             "assignments_updated": task.assignments_updated,
             "courses_scraped": task.courses_scraped,
+            "total_courses": task.total_courses,
+            "current_course": task.current_course,
+            "current_course_name": task.current_course_name,
         }
 
     def get_last_sync(self) -> Optional[dict]:
@@ -164,60 +170,150 @@ class SyncService:
                 logger.info(f"Sync [{task_id[:8]}]: {status.value} - {message}")
 
     def _run_sync(self, task_id: str):
-        """Run the sync process in a background thread."""
+        """Run the sync process in a background thread.
+
+        Includes resilience features:
+        - Passes web storage data alongside cookies for better session persistence
+        - If scraping fails with a session error, attempts to re-inject cookies
+          and retry from the failed point (not from scratch)
+        """
         task = self._tasks.get(task_id)
         if not task:
             return
 
         scraper = None
-        should_close_scraper = False  # Track if we created the scraper or got it from auth_store
+        should_close_scraper = False
 
         try:
             self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Checking authentication...")
             logger.info(f"Sync [{task_id[:8]}] - Checking for authenticated session...")
 
-            # First, check if we have an authenticated scraper from browser login
-            scraper = auth_store.get_authenticated_scraper()
+            # Try to use stored session cookies (from browser login)
+            cookies, base_url = auth_store.get_session_data()
+            local_storage, session_storage = auth_store.get_web_storage()
 
-            if scraper and scraper.driver:
-                logger.info(f"Sync [{task_id[:8]}] - Using existing authenticated session")
-                self._update_task(task_id, SyncStatus.SCRAPING, "Using authenticated session...")
-                should_close_scraper = False  # Don't close the shared scraper
-            else:
-                # No authenticated session - try headless check
-                logger.info(f"Sync [{task_id[:8]}] - No authenticated session, trying headless...")
-                self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Starting browser...")
+            if cookies and base_url:
+                logger.info(f"Sync [{task_id[:8]}] - Found stored cookies ({len(cookies)}), creating headless browser...")
+                if local_storage:
+                    logger.info(f"Sync [{task_id[:8]}] - Also found {len(local_storage)} localStorage items")
+                if session_storage:
+                    logger.info(f"Sync [{task_id[:8]}] - Also found {len(session_storage)} sessionStorage items")
+
+                self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Starting headless browser...")
 
                 scraper = LearningSuiteScraper(headless=True)
-                should_close_scraper = True
                 scraper._setup_driver()
+                should_close_scraper = True
 
-                self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Checking login status...")
-                already_logged_in = scraper.check_already_logged_in()
-
-                if already_logged_in:
-                    self._update_task(task_id, SyncStatus.SCRAPING, "Session found, scraping...")
-                else:
+                self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Restoring session...")
+                if not scraper.inject_cookies(cookies, base_url,
+                                              local_storage=local_storage,
+                                              session_storage=session_storage):
                     scraper.close()
-                    raise ValueError("Not authenticated. Please sign in with BYU first.")
+                    auth_store.clear_authentication()
+                    raise ValueError("Session expired. Please sign in with BYU again.")
 
-            # Scrape all courses - returns list of assignments
+                self._update_task(task_id, SyncStatus.SCRAPING, "Session restored, scraping...")
+            else:
+                # Fallback: check if there's a live authenticated scraper
+                scraper = auth_store.get_authenticated_scraper()
+
+                if scraper and scraper.driver:
+                    logger.info(f"Sync [{task_id[:8]}] - Using existing authenticated session")
+                    self._update_task(task_id, SyncStatus.SCRAPING, "Using authenticated session...")
+                    should_close_scraper = False
+                else:
+                    # No cookies, no live scraper -- try headless check
+                    logger.info(f"Sync [{task_id[:8]}] - No session data, trying headless...")
+                    self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Starting browser...")
+
+                    scraper = LearningSuiteScraper(headless=True)
+                    should_close_scraper = True
+                    scraper._setup_driver()
+
+                    self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Checking login status...")
+                    already_logged_in = scraper.check_already_logged_in()
+
+                    if already_logged_in:
+                        self._update_task(task_id, SyncStatus.SCRAPING, "Session found, scraping...")
+                    else:
+                        scraper.close()
+                        raise ValueError("Not authenticated. Please sign in with BYU first.")
+
+            # Define progress callback that updates task fields thread-safely
+            def progress_callback(current, total, course_name):
+                with self._task_lock:
+                    task.total_courses = total
+                    task.current_course = current
+                    task.current_course_name = course_name
+                    if current == 0:
+                        task.message = f"Found {total} courses, starting..."
+                    else:
+                        task.message = f"Scraped {course_name} ({current}/{total})"
+                logger.info(f"Sync [{task_id[:8]}] - Course {current}/{total}: {course_name}")
+
+            # Scrape all courses with progress reporting and per-course DB saves
+            # The scraper itself has built-in session resilience (keep-alive, retry, refresh)
             self._update_task(task_id, SyncStatus.SCRAPING, "Scraping assignments from courses...")
-            assignments = scraper.scrape_all_courses()
+            try:
+                assignments = scraper.scrape_all_courses(
+                    progress_callback=progress_callback,
+                    save_per_course=True
+                )
+            except Exception as scrape_error:
+                error_msg = str(scrape_error)
+                logger.error(f"Sync [{task_id[:8]}] - Scraping error: {error_msg}")
+
+                # Check if this is a session error that we can recover from
+                is_session_error = any(indicator in error_msg.lower() for indicator in [
+                    "session expired", "please sign in", "cas.byu.edu",
+                    "authentication", "login", "redirected"
+                ])
+
+                if is_session_error and cookies and base_url:
+                    logger.info(f"Sync [{task_id[:8]}] - Session error detected, attempting recovery...")
+                    self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Session lost, attempting recovery...")
+
+                    # Try to create a fresh headless browser and re-inject
+                    try:
+                        scraper.close()
+                    except:
+                        pass
+
+                    scraper = LearningSuiteScraper(headless=True)
+                    scraper._setup_driver()
+                    should_close_scraper = True
+
+                    if scraper.inject_cookies(cookies, base_url,
+                                              local_storage=local_storage,
+                                              session_storage=session_storage):
+                        logger.info(f"Sync [{task_id[:8]}] - Recovery successful, retrying scrape...")
+                        self._update_task(task_id, SyncStatus.SCRAPING, "Recovered, retrying scrape...")
+                        assignments = scraper.scrape_all_courses(
+                            progress_callback=progress_callback,
+                            save_per_course=True
+                        )
+                    else:
+                        auth_store.clear_authentication()
+                        raise ValueError("Session expired during sync and could not be recovered. Please sign in again.")
+                else:
+                    raise  # Re-raise non-session errors
+
             logger.info(f"Sync [{task_id[:8]}] - Scraped {len(assignments)} assignments")
 
-            # Update database with scraped assignments
-            self._update_task(task_id, SyncStatus.UPDATING_DB, "Saving to database...")
-            db_result = scraper.update_database(assignments)
-            logger.info(f"Sync [{task_id[:8]}] - Database update: {db_result}")
+            # Aggregate per-course DB results (already saved per-course)
+            total_new = 0
+            total_modified = 0
+            for db_result in getattr(scraper, '_per_course_db_results', []):
+                total_new += db_result.get("new", 0)
+                total_modified += db_result.get("modified", 0)
 
-            # Extract stats from the database update result
+            # Extract stats
             with self._task_lock:
-                # Count unique courses from assignments
                 courses = set(a.get("course_name") for a in assignments if a.get("course_name"))
                 task.courses_scraped = len(courses)
-                task.assignments_added = db_result.get("new", 0)
-                task.assignments_updated = db_result.get("modified", 0)
+                task.assignments_added = total_new
+                task.assignments_updated = total_modified
 
             # Build result summary for metadata
             result = {
@@ -253,7 +349,6 @@ class SyncService:
             self._save_sync_metadata(task_id, "failed", None, error_msg)
 
         finally:
-            # Only close scraper if we created it (not the shared authenticated one)
             if scraper and should_close_scraper:
                 try:
                     scraper.close()

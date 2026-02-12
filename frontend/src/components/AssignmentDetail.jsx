@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { API_BASE } from '../config/api'
 import './AssignmentDetail.css'
 
@@ -30,7 +30,6 @@ const TIME_ESTIMATES = [
 ]
 
 function AssignmentDetail({ assignment, onClose, onUpdate }) {
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Form state
@@ -61,6 +60,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
   const formatDueDate = (dateString) => {
     const date = new Date(dateString)
     return date.toLocaleDateString('en-US', {
+      timeZone: 'America/Denver',
       weekday: 'long',
       year: 'numeric',
       month: 'long',
@@ -71,7 +71,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
     })
   }
 
-  const isPastDue = new Date(assignment.due_date) < new Date() && assignment.status !== 'submitted'
+  const isPastDue = assignment.due_date && new Date(assignment.due_date) < new Date() && assignment.status !== 'submitted'
 
   const handleSave = async () => {
     setSaving(true)
@@ -149,10 +149,14 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
             <div className="detail-grid">
               <div className="detail-item">
                 <label className="detail-label">Due Date</label>
-                <p className={`detail-value ${isPastDue ? 'is-overdue' : ''}`}>
-                  {formatDueDate(assignment.due_date)}
-                  {isPastDue && <span className="overdue-tag">Overdue</span>}
-                </p>
+                {assignment.due_date ? (
+                  <p className={`detail-value ${isPastDue ? 'is-overdue' : ''}`}>
+                    {formatDueDate(assignment.due_date)}
+                    {isPastDue && <span className="overdue-tag">Overdue</span>}
+                  </p>
+                ) : (
+                  <p className="detail-value no-date">No due date</p>
+                )}
               </div>
 
               <div className="detail-item">
@@ -197,12 +201,14 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
               )}
             </div>
 
-            {assignment.description && (
-              <div className="description-block">
-                <label className="detail-label">Description</label>
+            <div className="description-block">
+              <label className="detail-label">Description</label>
+              {assignment.description ? (
                 <p className="description-text">{assignment.description}</p>
-              </div>
-            )}
+              ) : (
+                <p className="description-text no-description">No description available</p>
+              )}
+            </div>
           </section>
 
           {/* Plan Work Section */}

@@ -247,6 +247,16 @@
   border-radius: var(--radius-md);
 }
 
+.description-text.no-description {
+  color: var(--color-slate-400);
+  font-style: italic;
+}
+
+.detail-value.no-date {
+  color: var(--color-slate-400);
+  font-style: italic;
+}
+
 /* Plan Section */
 .plan-section {
   background: var(--color-slate-50);
