@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { API_BASE } from '../config/api'
+import { downloadICS, getGoogleCalendarUrl } from '../utils/calendar'
 import './AssignmentDetail.css'
 
 const STATUS_OPTIONS = [
@@ -271,6 +272,62 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
                 rows={3}
               />
             </div>
+          </section>
+
+          {/* Add to Calendar Section */}
+          <section className="detail-section calendar-section">
+            <h3 className="section-title">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+                <path d="M16 19l2 2 4-4" />
+              </svg>
+              Add to Calendar
+            </h3>
+            <div className="calendar-buttons">
+              <a
+                href={getGoogleCalendarUrl({
+                  ...assignment,
+                  planned_start: plannedStart ? new Date(plannedStart).toISOString() : '',
+                  planned_end: plannedEnd ? new Date(plannedEnd).toISOString() : '',
+                  estimated_minutes: estimatedMinutes ? parseInt(estimatedMinutes) : null,
+                })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="calendar-btn"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                Google Calendar
+              </a>
+              <button
+                type="button"
+                className="calendar-btn"
+                onClick={() => downloadICS({
+                  ...assignment,
+                  planned_start: plannedStart ? new Date(plannedStart).toISOString() : '',
+                  planned_end: plannedEnd ? new Date(plannedEnd).toISOString() : '',
+                  estimated_minutes: estimatedMinutes ? parseInt(estimatedMinutes) : null,
+                })}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Apple / Outlook (.ics)
+              </button>
+            </div>
+            <p className="calendar-hint">
+              {plannedStart && plannedEnd
+                ? 'Exports your planned study block as a calendar event.'
+                : 'Exports a reminder before the due date (set planned times above for a study block instead).'}
+            </p>
           </section>
         </div>
 

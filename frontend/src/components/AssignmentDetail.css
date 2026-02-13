@@ -344,6 +344,56 @@
   color: var(--color-slate-400);
 }
 
+/* Calendar Section */
+.calendar-section {
+  background: var(--color-slate-50);
+  margin-left: calc(var(--space-5) * -1);
+  margin-right: calc(var(--space-5) * -1);
+  margin-bottom: 0;
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--color-slate-200);
+}
+
+.calendar-buttons {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.calendar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: white;
+  border: 1px solid var(--color-slate-200);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-slate-700);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  font-family: inherit;
+}
+
+.calendar-btn:hover {
+  border-color: var(--color-primary-500);
+  color: var(--color-primary-600);
+  background: var(--color-primary-50, #eff6ff);
+}
+
+.calendar-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.calendar-hint {
+  margin: var(--space-2) 0 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-slate-400);
+  line-height: var(--leading-normal);
+}
+
 /* Modal Footer */
 .modal-footer {
   display: flex;
