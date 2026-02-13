@@ -15,9 +15,6 @@ const STATUS_MESSAGES = {
   failed: 'Failed',
 }
 
-// Log API_BASE on load for debugging
-console.log('[SyncButton] API_BASE configured as:', API_BASE)
-
 function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress }) {
   const [syncing, setSyncing] = useState(false)
   const [taskId, setTaskId] = useState(null)
@@ -32,7 +29,6 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
   // Handle external trigger to start sync (e.g., after login)
   useEffect(() => {
     if (triggerSync && !syncing) {
-      console.log('[SyncButton] Auto-sync triggered')
       handleSync()
       if (onSyncStarted) {
         onSyncStarted()
@@ -49,7 +45,6 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
     const pollStatus = async () => {
       const url = `${API_BASE}/sync/status/${taskId}`
       try {
-        console.log('[SyncButton] Polling status:', url)
         const response = await fetch(url)
 
         if (!response.ok) {
@@ -60,11 +55,9 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
           } catch {
             // Not JSON
           }
-          console.error(`[SyncButton] Status poll failed: ${errorDetail}`, 'URL:', url)
 
           pollFailCount++
           if (pollFailCount >= MAX_POLL_FAILURES) {
-            // Stop polling after multiple failures
             setError(`Status check failed: ${errorDetail}`)
             setSyncing(false)
             setTaskId(null)
@@ -79,7 +72,6 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
         pollFailCount = 0
 
         const data = await response.json()
-        console.log('[SyncButton] Status response:', data)
         setStatus(data)
 
         if (onSyncProgress) {
@@ -91,18 +83,18 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
           setTaskId(null)
           fetchLastSync()
           if (onSyncComplete) {
-            onSyncComplete()
+            onSyncComplete(data)
           }
         } else if (data.status === 'failed') {
           setSyncing(false)
           setTaskId(null)
           setError(data.error || 'Sync failed')
           if (onSyncComplete) {
-            onSyncComplete()
+            onSyncComplete(data)
           }
         }
       } catch (err) {
-        console.error('[SyncButton] Error polling status:', err.message, 'URL:', url)
+        console.error('[SyncButton] Error polling status:', err.message)
         pollFailCount++
         if (pollFailCount >= MAX_POLL_FAILURES) {
           setError(`Cannot reach backend: ${err.message}`)
@@ -122,22 +114,15 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
   }, [taskId, syncing, onSyncComplete])
 
   const fetchLastSync = async () => {
-    const url = `${API_BASE}/sync/last`
     try {
-      console.log('[SyncButton] Fetching last sync from:', url)
-      const response = await fetch(url)
-      if (!response.ok) {
-        console.error(`[SyncButton] Last sync fetch failed: HTTP ${response.status}`, 'URL:', url)
-        return
-      }
+      const response = await fetch(`${API_BASE}/sync/last`)
+      if (!response.ok) return
       const data = await response.json()
-      console.log('[SyncButton] Last sync response:', data)
       if (data.last_sync) {
         setLastSync(data.last_sync)
       }
     } catch (err) {
       console.error('[SyncButton] Error fetching last sync:', err.message)
-      console.error('[SyncButton] Attempted URL:', url)
     }
   }
 
@@ -152,46 +137,28 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
       onSyncStarted()
     }
 
-    const url = `${API_BASE}/sync/start`
     try {
-      console.log('[SyncButton] Starting sync POST to:', url)
-      const response = await fetch(url, {
+      const response = await fetch(`${API_BASE}/sync/start`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
       })
-
-      console.log('[SyncButton] Sync start response:', response.status, response.statusText, 'URL:', response.url)
 
       if (!response.ok) {
         let errorMessage = `HTTP ${response.status}: ${response.statusText}`
-        let responseBody = ''
         try {
-          responseBody = await response.text()
-          console.error('[SyncButton] Response body:', responseBody)
-          // Try to parse as JSON for better error message
+          const responseBody = await response.text()
           const data = JSON.parse(responseBody)
           errorMessage = data.detail || errorMessage
         } catch {
-          // Response wasn't JSON - might be HTML from frontend dev server
-          if (responseBody.includes('<!DOCTYPE') || responseBody.includes('<html')) {
-            errorMessage = `Backend not reachable at ${url}. Make sure uvicorn is running on port 8000.`
-          }
+          // Response wasn't JSON
         }
-        console.error('[SyncButton] Sync start error:', errorMessage)
-        console.error('[SyncButton] Request URL:', url)
-        console.error('[SyncButton] Response URL:', response.url)
         throw new Error(errorMessage)
       }
 
       const data = await response.json()
-      console.log('[SyncButton] Sync started successfully, task_id:', data.task_id)
       setTaskId(data.task_id)
     } catch (err) {
       console.error('[SyncButton] Error starting sync:', err.message)
-      console.error('[SyncButton] Attempted URL:', url)
-      // Provide helpful error message
       let displayError = err.message || 'Failed to connect to backend'
       if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
         displayError = `Cannot connect to backend at ${API_BASE}. Is the server running?`

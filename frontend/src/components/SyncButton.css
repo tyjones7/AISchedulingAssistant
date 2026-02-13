@@ -138,6 +138,13 @@
   display: block;
 }
 
+/* Responsive - compact sync info on medium screens */
+@media (max-width: 768px) {
+  .sync-info {
+    display: none;
+  }
+}
+
 /* Responsive - hide label on small screens */
 @media (max-width: 480px) {
   .sync-label {

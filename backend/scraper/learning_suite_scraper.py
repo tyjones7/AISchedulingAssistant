@@ -92,14 +92,16 @@ class LearningSuiteScraper:
         "authentication required",
     ]
 
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, debug: bool = False):
         """Initialize the scraper.
 
         Args:
             headless: Whether to run Chrome in headless mode
+            debug: Whether to enable debug output (HTML saves, verbose logging)
         """
         self.driver = None
         self.headless = headless
+        self.debug = debug
         self.supabase = None
         self.dynamic_base_url = None  # Set after login to include session segment (e.g., /.DaEo)
         self._injected_cookies = []  # Store cookies for re-injection
@@ -107,6 +109,7 @@ class LearningSuiteScraper:
         self._local_storage = {}  # Store localStorage for re-injection
         self._session_storage = {}  # Store sessionStorage for re-injection
         self._last_keepalive = None  # Track last keep-alive time
+        self._last_session_check = None  # Track last session validity check time
         self._session_refresh_count = 0  # Track how many times we've refreshed
         self._max_session_refreshes = 3  # Max refreshes before giving up
         self._setup_supabase()
@@ -276,7 +279,7 @@ class LearningSuiteScraper:
 
             # Navigate to the domain first (required to set cookies)
             self.driver.get(self.LEARNING_SUITE_URL)
-            time.sleep(1)
+            self._wait_for_page_ready(3)
 
             # Inject each cookie - keep all fields except truly problematic ones
             # Fields like 'expiry', 'sameSite' are important for session validity
@@ -322,7 +325,7 @@ class LearningSuiteScraper:
 
             # Verify the session works by navigating to the base URL
             self.driver.get(base_url)
-            time.sleep(2)
+            self._wait_for_page_ready()
 
             current_url = self.driver.current_url
             # If we're redirected to CAS login, the session is invalid
@@ -338,7 +341,7 @@ class LearningSuiteScraper:
             # Deep verification: try navigating to student top page
             student_url = f"{base_url}/student/top"
             self.driver.get(student_url)
-            time.sleep(2)
+            self._wait_for_page_ready()
 
             current_url = self.driver.current_url
             if 'cas.byu.edu' in current_url or 'duo' in current_url.lower():
@@ -401,11 +404,10 @@ class LearningSuiteScraper:
         try:
             # Clear existing cookies
             self.driver.delete_all_cookies()
-            time.sleep(1)
 
             # Re-navigate to domain
             self.driver.get(self.LEARNING_SUITE_URL)
-            time.sleep(1)
+            self._wait_for_page_ready(3)
 
             # Re-inject all cookies
             injected = 0
@@ -443,7 +445,7 @@ class LearningSuiteScraper:
 
             # Navigate to base URL and verify
             self.driver.get(self._injected_base_url)
-            time.sleep(2)
+            self._wait_for_page_ready()
 
             current_url = self.driver.current_url
             if 'cas.byu.edu' in current_url or 'duo' in current_url.lower():
@@ -476,14 +478,14 @@ class LearningSuiteScraper:
         """
         try:
             now = time.time()
-            # Only send keep-alive if more than 60 seconds since last one
-            if self._last_keepalive and (now - self._last_keepalive) < 60:
+            # Only send keep-alive if more than 120 seconds since last one
+            if self._last_keepalive and (now - self._last_keepalive) < 120:
                 return
 
-            logger.info("Sending session keep-alive...")
+            logger.debug("Sending session keep-alive...")
             # Touch the base URL to refresh the session timer
             self.driver.get(f"{self._get_base_url()}/student/top")
-            time.sleep(1)
+            self._wait_for_page_ready(3)
 
             # Verify we're still logged in
             if not self._check_session_valid():
@@ -502,14 +504,14 @@ class LearningSuiteScraper:
         Args:
             label: Optional label to include in the file header
         """
-        if not self.driver:
+        if not self.driver or not self.debug:
             return
         try:
             html = self.driver.page_source
             header = f"<!-- DEBUG DUMP: {label} -->\n<!-- URL: {self.driver.current_url} -->\n<!-- TIME: {datetime.now().isoformat()} -->\n"
             with open(self.DEBUG_HTML_PATH, "w", encoding="utf-8") as f:
                 f.write(header + html)
-            logger.info(f"Saved debug HTML to {self.DEBUG_HTML_PATH} ({label})")
+            logger.debug(f"Saved debug HTML to {self.DEBUG_HTML_PATH} ({label})")
         except Exception as e:
             logger.error(f"Failed to save debug HTML: {e}")
 
@@ -524,6 +526,19 @@ class LearningSuiteScraper:
         return WebDriverWait(self.driver, timeout).until(
             EC.element_to_be_clickable((by, value))
         )
+
+    def _wait_for_page_ready(self, timeout: int = 5):
+        """Wait for page to finish loading instead of using fixed sleep.
+
+        Waits for document.readyState === 'complete' and at least one
+        visible element in the body, with a short timeout.
+        """
+        try:
+            WebDriverWait(self.driver, timeout).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+        except TimeoutException:
+            pass  # Page didn't fully load in time, continue anyway
 
     def _is_error_page(self) -> bool:
         """Check if the current page is an error page.
@@ -615,7 +630,7 @@ class LearningSuiteScraper:
         try:
             logger.info(f"Navigating to: {url} ({description})")
             self.driver.get(url)
-            time.sleep(2)
+            self._wait_for_page_ready()
 
             # Check if session is still valid (not redirected to login)
             if not self._check_session_valid():
@@ -706,7 +721,7 @@ class LearningSuiteScraper:
             return False
 
         logger.info("Page loaded, waiting for redirect...")
-        time.sleep(3)
+        self._wait_for_page_ready()
 
         current_url = self.driver.current_url
         logger.info(f"Current URL after navigation: {current_url}")
@@ -766,7 +781,7 @@ class LearningSuiteScraper:
 
         logger.info("Navigating to Learning Suite...")
         self.driver.get(self.LEARNING_SUITE_URL)
-        time.sleep(3)
+        self._wait_for_page_ready()
 
         # Log current URL for debugging
         logger.info(f"Current URL: {self.driver.current_url}")
@@ -857,8 +872,8 @@ class LearningSuiteScraper:
                     submit_button.click()
                     logger.info("Clicked submit button")
 
-                # Wait for redirect
-                time.sleep(5)
+                # Wait for CAS redirect (auth redirects can be slow)
+                self._wait_for_page_ready(8)
                 logger.info(f"After submit URL: {self.driver.current_url}")
 
                 # Check for Duo MFA if present - multiple detection methods
@@ -883,9 +898,7 @@ class LearningSuiteScraper:
                     logger.info("Please complete authentication in the browser window.")
                     logger.info("You have 2 minutes to complete MFA...")
                     logger.info("=" * 50)
-                    print("\n" + "=" * 50)
-                    print(">>> WAITING FOR MFA - Complete authentication in browser")
-                    print("=" * 50 + "\n")
+                    logger.info("WAITING FOR MFA - Complete authentication in browser")
 
                     # Wait longer for manual MFA completion
                     try:
@@ -902,7 +915,7 @@ class LearningSuiteScraper:
                         return False
 
                 # Verify we're logged in
-                time.sleep(2)
+                self._wait_for_page_ready()
                 logger.info(f"Final URL: {self.driver.current_url}")
 
                 if "learningsuite.byu.edu" in self.driver.current_url:
@@ -924,7 +937,7 @@ class LearningSuiteScraper:
                     # Final verification - try to access the home page
                     home_url = f"{self.LEARNING_SUITE_URL}/"
                     self.driver.get(home_url)
-                    time.sleep(2)
+                    self._wait_for_page_ready()
 
                     if self._is_error_page():
                         logger.error("Cannot access Learning Suite home after login")
@@ -966,20 +979,17 @@ class LearningSuiteScraper:
             List of course dictionaries with 'name' and 'cid' keys
         """
         courses = []
-        print("\n" + "=" * 80)
-        print(">>> EXTRACTING COURSE LIST")
-        print("=" * 80)
+        logger.debug("\n" + "=" * 80)
+        logger.debug("EXTRACTING COURSE LIST")
+        logger.debug("=" * 80)
 
         try:
-            time.sleep(3)
-            print(f"Current URL: {self.driver.current_url}")
+            self._wait_for_page_ready()
+            logger.debug(f"Current URL: {self.driver.current_url}")
 
             # DIAGNOSTIC: Print full page text to see what course names are visible
             body_text = self.driver.find_element(By.TAG_NAME, "body").text
-            print("\n>>> FULL PAGE TEXT (first 2000 chars):")
-            print("-" * 60)
-            print(body_text[:2000])
-            print("-" * 60)
+            logger.debug(f"FULL PAGE TEXT (first 2000 chars): {body_text[:2000]}")
 
             # Pattern handles course codes with spaces like "REL C 333", "C S 142", "COM C 301"
             course_pattern = r'([A-Z]{1,5}(?:\s+[A-Z])?\s+\d{3}[A-Z]?\s*\([^)]+\)\s*-\s*[^\n]+)'
@@ -988,18 +998,18 @@ class LearningSuiteScraper:
             # Strategy: Find links whose TEXT directly contains a course name
             # This is more reliable than DOM traversal which can match wrong courses
             all_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='cid-']")
-            print(f"\n>>> Found {len(all_links)} cid links")
+            logger.debug(f"\n>>> Found {len(all_links)} cid links")
 
             # DIAGNOSTIC: Print all cid links with their text and href
-            print("\n>>> ALL CID LINKS FOUND:")
+            logger.debug("ALL CID LINKS FOUND:")
             for i, link in enumerate(all_links[:20]):  # Limit to first 20
                 try:
                     href = link.get_attribute("href") or ""
                     link_text = link.text.strip()[:100] if link.text else ""
-                    print(f"    [{i}] href='{href}' text='{link_text}'")
+                    logger.debug(f"    [{i}] href='{href}' text='{link_text}'")
                 except (NoSuchElementException, StaleElementReferenceException):
                     pass
-            print()
+            logger.debug("")
 
             # FIX: Only use links whose TEXT directly contains a course name
             # This avoids the DOM traversal bug where wrong course names get matched
@@ -1034,7 +1044,7 @@ class LearningSuiteScraper:
                                 "cid": cid,
                                 "url": href
                             })
-                            print(f"    [MATCHED] '{course_name}' -> cid-{cid}")
+                            logger.debug(f"    [MATCHED] '{course_name}' -> cid-{cid}")
 
                 except Exception as e:
                     logger.debug(f"Error processing link: {e}")
@@ -1096,42 +1106,42 @@ class LearningSuiteScraper:
         status_lower = status_text.lower().strip() if status_text else ""
 
         # DETAILED STATUS MAPPING LOGGING
-        print(f"    [STATUS MAPPING] Input: button='{button_text}', has_score={has_score}")
+        logger.debug(f"    [STATUS MAPPING] Input: button='{button_text}', has_score={has_score}")
 
         # Check for "Opens [date]" pattern - unavailable
         if button_lower.startswith("opens"):
-            print(f"    [STATUS MAPPING] -> 'unavailable' (reason: button starts with 'opens')")
+            logger.debug(f"    [STATUS MAPPING] -> 'unavailable' (reason: button starts with 'opens')")
             return "unavailable"
 
         # Check status text for unavailable
         if "unavailable" in status_lower or "unavailable" in button_lower:
-            print(f"    [STATUS MAPPING] -> 'unavailable' (reason: contains 'unavailable')")
+            logger.debug(f"    [STATUS MAPPING] -> 'unavailable' (reason: contains 'unavailable')")
             return "unavailable"
 
         # If there's a score/grade, it's likely submitted
         if has_score:
-            print(f"    [STATUS MAPPING] -> 'submitted' (reason: has_score=True)")
+            logger.debug(f"    [STATUS MAPPING] -> 'submitted' (reason: has_score=True)")
             return "submitted"
 
         # Check for ambiguous buttons - these default to not_started
         if button_lower in self.AMBIGUOUS_BUTTONS:
-            print(f"    [STATUS MAPPING] -> 'not_started' (reason: ambiguous button '{button_lower}')")
+            logger.debug(f"    [STATUS MAPPING] -> 'not_started' (reason: ambiguous button '{button_lower}')")
             return "not_started"
 
         # Look up in mapping - require EXACT match, not substring
         if button_lower in self.STATUS_MAPPING:
             status = self.STATUS_MAPPING[button_lower]
-            print(f"    [STATUS MAPPING] -> '{status}' (reason: exact match for '{button_lower}')")
+            logger.debug(f"    [STATUS MAPPING] -> '{status}' (reason: exact match for '{button_lower}')")
             return status
 
         # Try partial match for multi-word buttons
         for key, value in self.STATUS_MAPPING.items():
             if key in button_lower:
-                print(f"    [STATUS MAPPING] -> '{value}' (reason: partial match on '{key}')")
+                logger.debug(f"    [STATUS MAPPING] -> '{value}' (reason: partial match on '{key}')")
                 return value
 
         # Default to not_started if unknown
-        print(f"    [STATUS MAPPING] -> 'not_started' (reason: unknown button text '{button_text}')")
+        logger.debug(f"    [STATUS MAPPING] -> 'not_started' (reason: unknown button text '{button_text}')")
         return "not_started"
 
     def _infer_assignment_type(self, title: str, button_text: str) -> str:
@@ -1176,7 +1186,7 @@ class LearningSuiteScraper:
         # Navigate to course home page
         course_home_url = f"{self._get_base_url()}/cid-{cid}"
 
-        print(f"\n>>> Discovering tabs for {course_name}...")
+        logger.debug(f"\n>>> Discovering tabs for {course_name}...")
 
         if not self._safe_navigate(course_home_url, f"course home - {course_name}"):
             logger.warning(f"Could not access course home for {course_name}")
@@ -1184,7 +1194,7 @@ class LearningSuiteScraper:
 
         try:
             # Wait for page to fully load
-            time.sleep(2)
+            self._wait_for_page_ready()
 
             # Look for navigation links within the course
             # Learning Suite uses various nav patterns
@@ -1242,7 +1252,7 @@ class LearningSuiteScraper:
                 except Exception as e:
                     continue
 
-            print(f"    Discovered tabs: {list(tabs.keys())}")
+            logger.debug(f"    Discovered tabs: {list(tabs.keys())}")
 
         except Exception as e:
             logger.error(f"Error discovering tabs for {course_name}: {e}")
@@ -1269,19 +1279,17 @@ class LearningSuiteScraper:
         base_url = self._get_base_url()
 
         # DETAILED LOGGING
-        print("\n" + "=" * 70)
-        print(f">>> SCRAPING GRADES → ASSIGNMENTS VIEW (PRIMARY SOURCE)")
-        print(f">>> COURSE: {course_name}")
-        print(f">>> CID: {cid}")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.debug(f">>> SCRAPING GRADES → ASSIGNMENTS VIEW (PRIMARY SOURCE)")
+        logger.debug(f">>> COURSE: {course_name}")
+        logger.debug(f">>> CID: {cid}")
+        logger.debug("=" * 70)
 
         # Navigate to course first, then to Grades → Assignments
         course_url = f"{base_url}/cid-{cid}"
         if not self._safe_navigate(course_url, f"course home - {course_name}"):
-            print(f">>> WARNING: Could not access course home for {course_name}")
+            logger.debug(f"WARNING: Could not access course home for {course_name}")
             return assignments
-
-        time.sleep(2)
 
         # Try to click on Grades link in the sidebar/navigation
         grades_clicked = False
@@ -1306,13 +1314,13 @@ class LearningSuiteScraper:
                     if element and element.is_displayed():
                         element.click()
                         grades_clicked = True
-                        print(f">>> Clicked Grades link via: {selector}")
-                        time.sleep(2)
+                        logger.debug(f"Clicked Grades link via: {selector}")
+                        self._wait_for_page_ready()
                         break
                 except (NoSuchElementException, StaleElementReferenceException, TimeoutException):
                     continue
         except Exception as e:
-            print(f">>> Could not click Grades link: {e}")
+            logger.debug(f"Could not click Grades link: {e}")
 
         # If clicking didn't work, try direct URL navigation
         if not grades_clicked:
@@ -1327,10 +1335,8 @@ class LearningSuiteScraper:
                     break
 
         if not grades_clicked:
-            print(f">>> WARNING: Could not access grades for {course_name}")
+            logger.debug(f"WARNING: Could not access grades for {course_name}")
             return assignments
-
-        time.sleep(2)
 
         # Now try to click on "Assignments" sub-tab within Grades
         assignments_view_clicked = False
@@ -1359,18 +1365,18 @@ class LearningSuiteScraper:
                             if "assignment" in href.lower() or "assignment" in text:
                                 element.click()
                                 assignments_view_clicked = True
-                                print(f">>> Clicked Assignments sub-tab")
-                                time.sleep(2)
+                                logger.debug("Clicked Assignments sub-tab")
+                                self._wait_for_page_ready()
                                 break
                     if assignments_view_clicked:
                         break
                 except (NoSuchElementException, StaleElementReferenceException, TimeoutException):
                     continue
         except Exception as e:
-            print(f">>> Note: Could not click Assignments sub-tab: {e}")
+            logger.debug(f">>> Note: Could not click Assignments sub-tab: {e}")
 
         # Final URL check
-        print(f">>> ACTUAL URL: {self.driver.current_url}")
+        logger.debug(f">>> ACTUAL URL: {self.driver.current_url}")
 
         # SAVE DEBUG HTML
         self._save_debug_html(f"grades_assignments_{course_name}")
@@ -1379,12 +1385,12 @@ class LearningSuiteScraper:
         try:
             assignments = self._parse_grades_assignments_grid(course_name, cid)
         except Exception as e:
-            print(f">>> ERROR parsing grades grid: {e}")
+            logger.debug(f">>> ERROR parsing grades grid: {e}")
             import traceback
             traceback.print_exc()
 
-        print(f"\n>>> GRADES → ASSIGNMENTS COMPLETE: {len(assignments)} assignments found")
-        print("-" * 70)
+        logger.debug(f"\n>>> GRADES → ASSIGNMENTS COMPLETE: {len(assignments)} assignments found")
+        logger.debug("-" * 70)
 
         return assignments
 
@@ -1404,7 +1410,7 @@ class LearningSuiteScraper:
         assignments = []
         seen_titles = set()
 
-        print(f"\n>>> Parsing Grades → Assignments grid for {course_name} (cid: {cid})")
+        logger.debug(f"\n>>> Parsing Grades → Assignments grid for {course_name} (cid: {cid})")
 
         # PRIMARY STRATEGY: Extract embedded JavaScript data
         # Learning Suite embeds assignment data as: var assignments = [...];
@@ -1413,7 +1419,7 @@ class LearningSuiteScraper:
         # Try to extract the assignments JSON from the page source
         js_assignments = self._extract_js_assignments(page_source, course_name, cid)
         if js_assignments:
-            print(f">>> Found {len(js_assignments)} assignments via JavaScript extraction")
+            logger.debug(f">>> Found {len(js_assignments)} assignments via JavaScript extraction")
             for a in js_assignments:
                 if a["title"] not in seen_titles:
                     assignments.append(a)
@@ -1421,16 +1427,16 @@ class LearningSuiteScraper:
 
         # FALLBACK: If no JS data found, try DOM-based parsing
         if len(assignments) == 0:
-            print(">>> No JS data found, trying DOM-based parsing...")
+            logger.debug("No JS data found, trying DOM-based parsing...")
 
             # Try table rows
             tables = self.driver.find_elements(By.TAG_NAME, "table")
-            print(f">>> Found {len(tables)} tables on page")
+            logger.debug(f">>> Found {len(tables)} tables on page")
 
             for table_idx, table in enumerate(tables):
                 try:
                     rows = table.find_elements(By.CSS_SELECTOR, "tbody tr, tr")
-                    print(f">>> Table {table_idx}: {len(rows)} rows")
+                    logger.debug(f">>> Table {table_idx}: {len(rows)} rows")
 
                     for row in rows:
                         try:
@@ -1447,7 +1453,7 @@ class LearningSuiteScraper:
 
         # Additional fallback strategies
         if len(assignments) == 0:
-            print(">>> Trying alternative DOM selectors...")
+            logger.debug("Trying alternative DOM selectors...")
             item_selectors = [
                 "[class*='assignment-item']",
                 "[class*='grade-item']",
@@ -1459,7 +1465,7 @@ class LearningSuiteScraper:
                 try:
                     items = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if items:
-                        print(f">>> Found {len(items)} items via selector: {selector}")
+                        logger.debug(f">>> Found {len(items)} items via selector: {selector}")
                         for item in items:
                             try:
                                 assignment = self._parse_gradebook_item(item, course_name, seen_titles, cid=cid)
@@ -1503,7 +1509,7 @@ class LearningSuiteScraper:
                 match = re.search(pattern, page_source)
 
             if not match:
-                print(">>> No embedded assignments JSON found")
+                logger.debug("No embedded assignments JSON found")
                 return assignments
 
             json_str = match.group(1)
@@ -1516,17 +1522,17 @@ class LearningSuiteScraper:
             try:
                 js_data = json.loads(json_str)
             except json.JSONDecodeError as e:
-                print(f">>> JSON parse error: {e}")
+                logger.debug(f">>> JSON parse error: {e}")
                 # Try fixing common issues
                 json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas
                 json_str = re.sub(r',\s*}', '}', json_str)
                 try:
                     js_data = json.loads(json_str)
                 except (json.JSONDecodeError, ValueError):
-                    print(">>> Could not parse JSON after cleanup")
+                    logger.debug("Could not parse JSON after cleanup")
                     return assignments
 
-            print(f">>> Parsed {len(js_data)} items from JavaScript")
+            logger.debug(f">>> Parsed {len(js_data)} items from JavaScript")
 
             # Convert each JS assignment object to our format
             for item in js_data:
@@ -1534,13 +1540,13 @@ class LearningSuiteScraper:
                     assignment = self._convert_js_assignment(item, course_name, cid)
                     if assignment:
                         assignments.append(assignment)
-                        print(f"    [JS] '{assignment['title']}' | Due: {assignment['due_date']} | Status: {assignment['status']}")
+                        logger.debug(f"    [JS] '{assignment['title']}' | Due: {assignment['due_date']} | Status: {assignment['status']}")
                 except Exception as e:
-                    print(f"    [JS ERROR] {e}")
+                    logger.debug(f"    [JS ERROR] {e}")
                     continue
 
         except Exception as e:
-            print(f">>> Error extracting JS assignments: {e}")
+            logger.debug(f">>> Error extracting JS assignments: {e}")
 
         return assignments
 
@@ -1607,7 +1613,7 @@ class LearningSuiteScraper:
                 # Only definitive indicators of completion
                 status = "submitted"
 
-            print(f"    [JS STATUS] title='{title[:30]}' score={score} feedback={has_feedback} graded={is_graded} submitted={is_submitted} button='{button_text}' -> {status}")
+            logger.debug(f"    [JS STATUS] title='{title[:30]}' score={score} feedback={has_feedback} graded={is_graded} submitted={is_submitted} button='{button_text}' -> {status}")
 
             # Infer assignment type from the 'type' field or title FIRST (needed for URL construction)
             ls_type = item.get("type", "").lower()
@@ -1666,7 +1672,7 @@ class LearningSuiteScraper:
             }
 
         except Exception as e:
-            print(f"    [CONVERT ERROR] {e}")
+            logger.debug(f"    [CONVERT ERROR] {e}")
             return None
 
     def _parse_ls_date(self, date_str: str) -> Optional[str]:
@@ -1905,7 +1911,7 @@ class LearningSuiteScraper:
             # Infer assignment type
             assignment_type = self._infer_assignment_type(title, button_text)
 
-            print(f"    [FOUND] '{title}' | Status: {status} | Due: {due_date}")
+            logger.debug(f"    [FOUND] '{title}' | Status: {status} | Due: {due_date}")
 
             return {
                 "title": title,
@@ -1994,7 +2000,7 @@ class LearningSuiteScraper:
             status = self._map_status(button_text, has_score=has_score)
             assignment_type = self._infer_assignment_type(title, button_text)
 
-            print(f"    [ITEM] '{title}' | Status: {status}")
+            logger.debug(f"    [ITEM] '{title}' | Status: {status}")
 
             return {
                 "title": title,
@@ -2029,7 +2035,7 @@ class LearningSuiteScraper:
         try:
             # Look for table headers that might be assignment names
             headers = self.driver.find_elements(By.CSS_SELECTOR, "th, thead td")
-            print(f">>> Found {len(headers)} potential column headers")
+            logger.debug(f">>> Found {len(headers)} potential column headers")
 
             for header in headers:
                 try:
@@ -2058,7 +2064,7 @@ class LearningSuiteScraper:
                     # Infer type from title
                     assignment_type = self._infer_assignment_type(text, "")
 
-                    print(f"    [COLUMN] '{text}'")
+                    logger.debug(f"    [COLUMN] '{text}'")
 
                     assignments.append({
                         "title": text,
@@ -2076,7 +2082,7 @@ class LearningSuiteScraper:
                     continue
 
         except Exception as e:
-            print(f">>> Column parsing error: {e}")
+            logger.debug(f">>> Column parsing error: {e}")
 
         return assignments
 
@@ -2095,7 +2101,7 @@ class LearningSuiteScraper:
         try:
             # Find all links that might be assignments
             all_links = self.driver.find_elements(By.TAG_NAME, "a")
-            print(f">>> Scanning {len(all_links)} links for assignments...")
+            logger.debug(f">>> Scanning {len(all_links)} links for assignments...")
 
             for link in all_links:
                 try:
@@ -2127,7 +2133,7 @@ class LearningSuiteScraper:
                         if text not in seen_titles:
                             assignment_type = self._infer_assignment_type(text, "")
 
-                            print(f"    [LINK] '{text}' -> {href[:60]}...")
+                            logger.debug(f"    [LINK] '{text}' -> {href[:60]}...")
 
                             assignments.append({
                                 "title": text,
@@ -2145,7 +2151,7 @@ class LearningSuiteScraper:
                     continue
 
         except Exception as e:
-            print(f">>> Link parsing error: {e}")
+            logger.debug(f">>> Link parsing error: {e}")
 
         return assignments
 
@@ -2178,12 +2184,12 @@ class LearningSuiteScraper:
         exams_url = f"{base_url}/cid-{cid}/student/exam"
 
         # DETAILED LOGGING - Course being scraped
-        print("\n" + "=" * 70)
-        print(f">>> SCRAPING EXAMS TAB")
-        print(f">>> COURSE: {course_name}")
-        print(f">>> CID: {cid}")
-        print(f">>> URL: {exams_url}")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.debug(f">>> SCRAPING EXAMS TAB")
+        logger.debug(f">>> COURSE: {course_name}")
+        logger.debug(f">>> CID: {cid}")
+        logger.debug(f">>> URL: {exams_url}")
+        logger.debug("=" * 70)
 
         # Try multiple URL patterns for exams
         exams_urls = [
@@ -2199,7 +2205,7 @@ class LearningSuiteScraper:
                 break
 
         if not navigated:
-            print(f">>> WARNING: Could not access exams tab for {course_name}")
+            logger.debug(f">>> WARNING: Could not access exams tab for {course_name}")
             return assignments
 
         try:
@@ -2212,31 +2218,31 @@ class LearningSuiteScraper:
                 "table tbody tr, .exam-row, .exam-item"
             )
 
-            print(f"\n>>> Found {len(rows)} potential exam rows")
+            logger.debug(f"\n>>> Found {len(rows)} potential exam rows")
 
             for i, row in enumerate(rows):
                 try:
-                    print(f"\n--- Processing exam row {i+1}/{len(rows)} ---")
+                    logger.debug(f"\n--- Processing exam row {i+1}/{len(rows)} ---")
                     assignment = self._parse_assignment_row(row, course_name, is_exam=True, cid=cid)
                     if assignment:
                         assignments.append(assignment)
-                        print(f"    [ADDED] Exam added to list")
+                        logger.debug(f"    [ADDED] Exam added to list")
                     else:
-                        print(f"    [SKIPPED] Row did not yield valid exam")
+                        logger.debug(f"    [SKIPPED] Row did not yield valid exam")
                 except StaleElementReferenceException:
-                    print(f"    [ERROR] Stale element - skipping")
+                    logger.debug(f"    [ERROR] Stale element - skipping")
                     continue
                 except Exception as e:
-                    print(f"    [ERROR] Error parsing exam row: {e}")
+                    logger.debug(f"    [ERROR] Error parsing exam row: {e}")
                     continue
 
-            print(f"\n>>> EXAMS TAB COMPLETE: {len(assignments)} exams found")
-            print("-" * 70)
+            logger.debug(f"\n>>> EXAMS TAB COMPLETE: {len(assignments)} exams found")
+            logger.debug("-" * 70)
 
         except TimeoutException:
-            print(f">>> WARNING: Exams tab not found or timed out for {course_name}")
+            logger.debug(f">>> WARNING: Exams tab not found or timed out for {course_name}")
         except Exception as e:
-            print(f">>> ERROR: Error scraping Exams tab for {course_name}: {e}")
+            logger.debug(f">>> ERROR: Error scraping Exams tab for {course_name}: {e}")
 
         return assignments
 
@@ -2257,12 +2263,12 @@ class LearningSuiteScraper:
         assignments_url = f"{base_url}/cid-{cid}/student/assignments"
 
         # DETAILED LOGGING - Course being scraped
-        print("\n" + "=" * 70)
-        print(f">>> SCRAPING ASSIGNMENTS TAB")
-        print(f">>> COURSE: {course_name}")
-        print(f">>> CID: {cid}")
-        print(f">>> URL: {assignments_url}")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.debug(f">>> SCRAPING ASSIGNMENTS TAB")
+        logger.debug(f">>> COURSE: {course_name}")
+        logger.debug(f">>> CID: {cid}")
+        logger.debug(f">>> URL: {assignments_url}")
+        logger.debug("=" * 70)
 
         # Try multiple URL patterns for assignments
         assignments_urls = [
@@ -2278,19 +2284,19 @@ class LearningSuiteScraper:
                 break
 
         if not navigated:
-            print(f">>> WARNING: Could not access assignments tab for {course_name} - tab may not exist")
+            logger.debug(f">>> WARNING: Could not access assignments tab for {course_name} - tab may not exist")
             return assignments
 
         try:
             # DIAGNOSTIC: Print the actual page title/header to verify we're on the right course
             try:
                 page_header = self.driver.find_element(By.CSS_SELECTOR, "h1, .course-title, .page-title, header")
-                print(f">>> PAGE HEADER TEXT: '{page_header.text[:200]}'")
+                logger.debug(f">>> PAGE HEADER TEXT: '{page_header.text[:200]}'")
             except (NoSuchElementException, StaleElementReferenceException):
                 pass
 
             # DIAGNOSTIC: Check current URL to confirm we're on the right course
-            print(f">>> ACTUAL URL: {self.driver.current_url}")
+            logger.debug(f">>> ACTUAL URL: {self.driver.current_url}")
 
             # SAVE DEBUG HTML before parsing
             self._save_debug_html(f"assignments_tab_{course_name}")
@@ -2305,31 +2311,31 @@ class LearningSuiteScraper:
                 # Try alternative selectors for list-style layouts
                 rows = self.driver.find_elements(By.CSS_SELECTOR, ".list-item, .item-row, li[class*='assign']")
 
-            print(f"\n>>> Found {len(rows)} potential assignment rows")
+            logger.debug(f"\n>>> Found {len(rows)} potential assignment rows")
 
             for i, row in enumerate(rows):
                 try:
-                    print(f"\n--- Processing assignment row {i+1}/{len(rows)} ---")
+                    logger.debug(f"\n--- Processing assignment row {i+1}/{len(rows)} ---")
                     assignment = self._parse_assignment_row(row, course_name, is_exam=False, cid=cid)
                     if assignment:
                         assignments.append(assignment)
-                        print(f"    [ADDED] Assignment added to list")
+                        logger.debug(f"    [ADDED] Assignment added to list")
                     else:
-                        print(f"    [SKIPPED] Row did not yield valid assignment")
+                        logger.debug(f"    [SKIPPED] Row did not yield valid assignment")
                 except StaleElementReferenceException:
-                    print(f"    [ERROR] Stale element - skipping")
+                    logger.debug(f"    [ERROR] Stale element - skipping")
                     continue
                 except Exception as e:
-                    print(f"    [ERROR] Error parsing assignment row: {e}")
+                    logger.debug(f"    [ERROR] Error parsing assignment row: {e}")
                     continue
 
-            print(f"\n>>> ASSIGNMENTS TAB COMPLETE: {len(assignments)} assignments found")
-            print("-" * 70)
+            logger.debug(f"\n>>> ASSIGNMENTS TAB COMPLETE: {len(assignments)} assignments found")
+            logger.debug("-" * 70)
 
         except TimeoutException:
-            print(f">>> WARNING: Assignments tab not found or timed out for {course_name}")
+            logger.debug(f">>> WARNING: Assignments tab not found or timed out for {course_name}")
         except Exception as e:
-            print(f">>> ERROR: Error scraping Assignments tab for {course_name}: {e}")
+            logger.debug(f">>> ERROR: Error scraping Assignments tab for {course_name}: {e}")
 
         return assignments
 
@@ -2350,12 +2356,12 @@ class LearningSuiteScraper:
         content_url = f"{base_url}/cid-{cid}/student/content"
 
         # DETAILED LOGGING
-        print("\n" + "=" * 70)
-        print(f">>> SCRAPING CONTENT TAB")
-        print(f">>> COURSE: {course_name}")
-        print(f">>> CID: {cid}")
-        print(f">>> URL: {content_url}")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.debug(f">>> SCRAPING CONTENT TAB")
+        logger.debug(f">>> COURSE: {course_name}")
+        logger.debug(f">>> CID: {cid}")
+        logger.debug(f">>> URL: {content_url}")
+        logger.debug("=" * 70)
 
         # Try multiple URL patterns for content
         content_urls = [
@@ -2371,11 +2377,11 @@ class LearningSuiteScraper:
                 break
 
         if not navigated:
-            print(f">>> WARNING: Could not access content tab for {course_name} - tab may not exist")
+            logger.debug(f">>> WARNING: Could not access content tab for {course_name} - tab may not exist")
             return assignments
 
         try:
-            print(f">>> ACTUAL URL: {self.driver.current_url}")
+            logger.debug(f">>> ACTUAL URL: {self.driver.current_url}")
 
             # SAVE DEBUG HTML before parsing
             self._save_debug_html(f"content_tab_{course_name}")
@@ -2387,7 +2393,7 @@ class LearningSuiteScraper:
                 "a[href*='assignment'], a[href*='quiz'], a[href*='exam'], a[href*='submit']"
             )
 
-            print(f"\n>>> Found {len(assignment_links)} potential assignment links in content")
+            logger.debug(f"\n>>> Found {len(assignment_links)} potential assignment links in content")
 
             seen_titles = set()
             for link in assignment_links:
@@ -2419,7 +2425,7 @@ class LearningSuiteScraper:
 
                     assignment_type = self._infer_assignment_type(title, "")
 
-                    print(f"    [CONTENT] Found: '{title}' -> {href}")
+                    logger.debug(f"    [CONTENT] Found: '{title}' -> {href}")
 
                     assignments.append({
                         "title": title,
@@ -2433,16 +2439,16 @@ class LearningSuiteScraper:
                     })
 
                 except Exception as e:
-                    print(f"    [ERROR] Error processing content link: {e}")
+                    logger.debug(f"    [ERROR] Error processing content link: {e}")
                     continue
 
-            print(f"\n>>> CONTENT TAB COMPLETE: {len(assignments)} assignments found")
-            print("-" * 70)
+            logger.debug(f"\n>>> CONTENT TAB COMPLETE: {len(assignments)} assignments found")
+            logger.debug("-" * 70)
 
         except TimeoutException:
-            print(f">>> WARNING: Content tab not found or timed out for {course_name}")
+            logger.debug(f">>> WARNING: Content tab not found or timed out for {course_name}")
         except Exception as e:
-            print(f">>> ERROR: Error scraping Content tab for {course_name}: {e}")
+            logger.debug(f">>> ERROR: Error scraping Content tab for {course_name}: {e}")
 
         return assignments
 
@@ -2463,12 +2469,12 @@ class LearningSuiteScraper:
         schedule_url = f"{base_url}/cid-{cid}/student/schedule"
 
         # DETAILED LOGGING
-        print("\n" + "=" * 70)
-        print(f">>> SCRAPING SCHEDULE TAB")
-        print(f">>> COURSE: {course_name}")
-        print(f">>> CID: {cid}")
-        print(f">>> URL: {schedule_url}")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.debug(f">>> SCRAPING SCHEDULE TAB")
+        logger.debug(f">>> COURSE: {course_name}")
+        logger.debug(f">>> CID: {cid}")
+        logger.debug(f">>> URL: {schedule_url}")
+        logger.debug("=" * 70)
 
         # Try multiple URL patterns for schedule
         schedule_urls = [
@@ -2484,11 +2490,11 @@ class LearningSuiteScraper:
                 break
 
         if not navigated:
-            print(f">>> WARNING: Could not access schedule tab for {course_name} - tab may not exist")
+            logger.debug(f">>> WARNING: Could not access schedule tab for {course_name} - tab may not exist")
             return assignments
 
         try:
-            print(f">>> ACTUAL URL: {self.driver.current_url}")
+            logger.debug(f">>> ACTUAL URL: {self.driver.current_url}")
 
             # SAVE DEBUG HTML before parsing
             self._save_debug_html(f"schedule_tab_{course_name}")
@@ -2500,31 +2506,31 @@ class LearningSuiteScraper:
                 "table tbody tr, .schedule-item, .schedule-row, [class*='schedule'], .item-row"
             )
 
-            print(f"\n>>> Found {len(rows)} potential schedule rows")
+            logger.debug(f"\n>>> Found {len(rows)} potential schedule rows")
 
             for i, row in enumerate(rows):
                 try:
-                    print(f"\n--- Processing schedule row {i+1}/{len(rows)} ---")
+                    logger.debug(f"\n--- Processing schedule row {i+1}/{len(rows)} ---")
                     assignment = self._parse_assignment_row(row, course_name, is_exam=False, cid=cid)
                     if assignment:
                         assignments.append(assignment)
-                        print(f"    [ADDED] Schedule item added to list")
+                        logger.debug(f"    [ADDED] Schedule item added to list")
                     else:
-                        print(f"    [SKIPPED] Row did not yield valid assignment")
+                        logger.debug(f"    [SKIPPED] Row did not yield valid assignment")
                 except StaleElementReferenceException:
-                    print(f"    [ERROR] Stale element - skipping")
+                    logger.debug(f"    [ERROR] Stale element - skipping")
                     continue
                 except Exception as e:
-                    print(f"    [ERROR] Error parsing schedule row: {e}")
+                    logger.debug(f"    [ERROR] Error parsing schedule row: {e}")
                     continue
 
-            print(f"\n>>> SCHEDULE TAB COMPLETE: {len(assignments)} assignments found")
-            print("-" * 70)
+            logger.debug(f"\n>>> SCHEDULE TAB COMPLETE: {len(assignments)} assignments found")
+            logger.debug("-" * 70)
 
         except TimeoutException:
-            print(f">>> WARNING: Schedule tab not found or timed out for {course_name}")
+            logger.debug(f">>> WARNING: Schedule tab not found or timed out for {course_name}")
         except Exception as e:
-            print(f">>> ERROR: Error scraping Schedule tab for {course_name}: {e}")
+            logger.debug(f">>> ERROR: Error scraping Schedule tab for {course_name}: {e}")
 
         return assignments
 
@@ -2543,7 +2549,7 @@ class LearningSuiteScraper:
             # Get all text content
             row_text = row.text.strip()
             if not row_text:
-                print(f"    [EMPTY] Row has no text content")
+                logger.debug(f"    [EMPTY] Row has no text content")
                 return None
 
             # Button words to exclude from titles
@@ -2561,11 +2567,11 @@ class LearningSuiteScraper:
             is_unavailable = False  # Flag to track unavailable status - once set, don't overwrite
 
             # DETAILED LOGGING - Show raw row text
-            print(f"    [RAW TEXT] {row_text[:150]}{'...' if len(row_text) > 150 else ''}")
+            logger.debug(f"    [RAW TEXT] {row_text[:150]}{'...' if len(row_text) > 150 else ''}")
 
             if cells:
                 # Table row - look through cells
-                print(f"    [TABLE ROW] Found {len(cells)} cells")
+                logger.debug(f"    [TABLE ROW] Found {len(cells)} cells")
 
                 for i, cell in enumerate(cells):
                     cell_text = cell.text.strip()
@@ -2576,9 +2582,9 @@ class LearningSuiteScraper:
                         pass
 
                     # DIAGNOSTIC: Print ALL cells including empty ones to see structure
-                    print(f"      Cell[{i}]: text='{cell_text[:80]}{'...' if len(cell_text) > 80 else ''}'")
+                    logger.debug(f"      Cell[{i}]: text='{cell_text[:80]}{'...' if len(cell_text) > 80 else ''}'")
                     if cell_html:
-                        print(f"               html='{cell_html[:100]}{'...' if len(cell_html) > 100 else ''}'")
+                        logger.debug(f"               html='{cell_html[:100]}{'...' if len(cell_html) > 100 else ''}'")
 
                     if not cell_text:
                         continue
@@ -2590,13 +2596,13 @@ class LearningSuiteScraper:
                     if cell_lower == 'unavailable' or cell_lower.startswith('opens'):
                         button_text = cell_text
                         is_unavailable = True
-                        print(f"        -> UNAVAILABLE STATUS FOUND: '{button_text}' (locked, won't be overwritten)")
+                        logger.debug(f"        -> UNAVAILABLE STATUS FOUND: '{button_text}' (locked, won't be overwritten)")
                         continue
 
                     # Check for EXCUSED or other grade text (before button check)
                     if cell_lower in ['excused', 'exempt', 'dropped', 'waived']:
                         has_score = True  # Treat as submitted/graded
-                        print(f"        -> EXCUSED/EXEMPT FOUND: '{cell_text}' (treating as submitted)")
+                        logger.debug(f"        -> EXCUSED/EXEMPT FOUND: '{cell_text}' (treating as submitted)")
                         continue
 
                     # Check if this cell contains a button/link (but only if not already unavailable)
@@ -2606,7 +2612,7 @@ class LearningSuiteScraper:
                             btn_text = button_or_link.text.strip().lower()
                             if btn_text in button_words or btn_text.startswith('opens'):
                                 button_text = button_or_link.text.strip()
-                                print(f"        -> BUTTON FOUND: '{button_text}'")
+                                logger.debug(f"        -> BUTTON FOUND: '{button_text}'")
                                 try:
                                     assignment_url = button_or_link.get_attribute("href")
                                 except (StaleElementReferenceException, NoSuchElementException):
@@ -2619,13 +2625,13 @@ class LearningSuiteScraper:
                     if cell_lower in button_words or cell_lower.startswith('opens'):
                         if not button_text and not is_unavailable:  # Only set if not already found
                             button_text = cell_text
-                            print(f"        -> BUTTON TEXT (cell): '{button_text}'")
+                            logger.debug(f"        -> BUTTON TEXT (cell): '{button_text}'")
                         continue
 
                     # Check for score/grade pattern (e.g., "85/100", "95%", "A", "Excused")
                     if re.match(r'^\d+(\.\d+)?(/\d+)?%?$', cell_text) or re.match(r'^[A-F][+-]?$', cell_text):
                         has_score = True
-                        print(f"        -> SCORE FOUND: '{cell_text}'")
+                        logger.debug(f"        -> SCORE FOUND: '{cell_text}'")
                         continue
 
                     # ENHANCED DATE DETECTION - Check multiple patterns
@@ -2637,24 +2643,24 @@ class LearningSuiteScraper:
                         )
                         if date_match:
                             due_date = self._parse_date(date_match.group(1))
-                            print(f"        -> DATE FOUND (MM/DD): '{cell_text}' -> parsed: {due_date}")
+                            logger.debug(f"        -> DATE FOUND (MM/DD): '{cell_text}' -> parsed: {due_date}")
                         continue
 
                     # Pattern 2: Month name format (Jan 15, 2024)
                     month_pattern = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}'
                     if re.search(month_pattern, cell_text, re.IGNORECASE):
-                        print(f"        -> DATE FOUND (Month name): '{cell_text}'")
+                        logger.debug(f"        -> DATE FOUND (Month name): '{cell_text}'")
                         due_date = self._parse_date(cell_text)
                         if due_date:
-                            print(f"           -> Parsed to: {due_date}")
+                            logger.debug(f"           -> Parsed to: {due_date}")
                         else:
-                            print(f"           -> FAILED TO PARSE!")
+                            logger.debug(f"           -> FAILED TO PARSE!")
                         continue
 
                     # Otherwise, this is likely the title
                     if not title and cell_lower not in button_words:
                         title = cell_text
-                        print(f"        -> TITLE FOUND: '{title}'")
+                        logger.debug(f"        -> TITLE FOUND: '{title}'")
 
                 # FALLBACK: If no assignment URL was found yet, search all links in the row
                 if not assignment_url:
@@ -2671,37 +2677,37 @@ class LearningSuiteScraper:
                                     "submit" in href or
                                     "cid-" in href):
                                     assignment_url = href
-                                    print(f"    [FALLBACK LINK] Found: {href}")
+                                    logger.debug(f"    [FALLBACK LINK] Found: {href}")
                                     break
                     except (NoSuchElementException, StaleElementReferenceException):
                         pass
 
             else:
                 # Not a table row - parse from text
-                print(f"    [NON-TABLE] Parsing from text...")
+                logger.debug(f"    [NON-TABLE] Parsing from text...")
                 text_parts = [p.strip() for p in row_text.split('\n') if p.strip()]
 
                 for part in text_parts:
                     part_lower = part.lower()
-                    print(f"      Part: '{part}'")
+                    logger.debug(f"      Part: '{part}'")
 
                     # PRIORITY CHECK: Check for "unavailable" FIRST
                     if part_lower == 'unavailable' or part_lower.startswith('opens'):
                         button_text = part
                         is_unavailable = True
-                        print(f"        -> UNAVAILABLE STATUS FOUND: '{button_text}' (locked)")
+                        logger.debug(f"        -> UNAVAILABLE STATUS FOUND: '{button_text}' (locked)")
                         continue
 
                     # Check if it's a button word (but only if not already unavailable)
                     if part_lower in button_words:
                         if not is_unavailable:
                             button_text = part
-                            print(f"        -> BUTTON TEXT: '{button_text}'")
+                            logger.debug(f"        -> BUTTON TEXT: '{button_text}'")
                     elif not title and part_lower not in button_words:
                         # Skip if it looks like a date
                         if not re.match(r'^\d{1,2}/\d{1,2}', part):
                             title = part
-                            print(f"        -> TITLE: '{title}'")
+                            logger.debug(f"        -> TITLE: '{title}'")
 
                 # Look for dates in full text
                 date_match = re.search(
@@ -2731,12 +2737,12 @@ class LearningSuiteScraper:
 
             # Validate title - skip if it's empty or just a button word
             if not title or title.lower() in button_words:
-                print(f"    [SKIP] No valid title found")
+                logger.debug(f"    [SKIP] No valid title found")
                 return None
 
             # If title is too short or generic, skip
             if len(title) < 3:
-                print(f"    [SKIP] Title too short: '{title}'")
+                logger.debug(f"    [SKIP] Title too short: '{title}'")
                 return None
 
             # Map status - pass has_score for better determination
@@ -2746,15 +2752,15 @@ class LearningSuiteScraper:
             assignment_type = "exam" if is_exam else self._infer_assignment_type(title, button_text)
 
             # DETAILED LOGGING - Final assignment details
-            print(f"\n    ========== ASSIGNMENT PARSED ==========")
-            print(f"    TITLE:       '{title}'")
-            print(f"    COURSE:      '{course_name}'")
-            print(f"    BUTTON:      '{button_text}'")
-            print(f"    STATUS:      '{status}'")
-            print(f"    HAS SCORE:   {has_score}")
-            print(f"    DUE DATE:    {due_date}")
-            print(f"    TYPE:        {assignment_type}")
-            print(f"    ===========================================\n")
+            logger.debug(f"\n    ========== ASSIGNMENT PARSED ==========")
+            logger.debug(f"    TITLE:       '{title}'")
+            logger.debug(f"    COURSE:      '{course_name}'")
+            logger.debug(f"    BUTTON:      '{button_text}'")
+            logger.debug(f"    STATUS:      '{status}'")
+            logger.debug(f"    HAS SCORE:   {has_score}")
+            logger.debug(f"    DUE DATE:    {due_date}")
+            logger.debug(f"    TYPE:        {assignment_type}")
+            logger.debug(f"    ===========================================\n")
 
             return {
                 "title": title,
@@ -2769,7 +2775,7 @@ class LearningSuiteScraper:
             }
 
         except Exception as e:
-            print(f"    [ERROR] Error parsing assignment row: {e}")
+            logger.debug(f"    [ERROR] Error parsing assignment row: {e}")
             return None
 
     def _parse_date(self, date_str: str) -> Optional[str]:
@@ -2875,7 +2881,7 @@ class LearningSuiteScraper:
                     dt = dt.replace(hour=23, minute=59)
 
                 dt = dt.replace(tzinfo=mountain)
-                print(f"           [DATE PARSE SUCCESS] '{original_str}' -> {dt.isoformat()} (format: {fmt})")
+                logger.debug(f"           [DATE PARSE SUCCESS] '{original_str}' -> {dt.isoformat()} (format: {fmt})")
                 return dt.isoformat()
             except ValueError:
                 continue
@@ -2892,12 +2898,12 @@ class LearningSuiteScraper:
             if match:
                 extracted = match.group(1)
                 if extracted != date_str:  # Only if we actually extracted something different
-                    print(f"           [DATE EXTRACT] Trying extracted: '{extracted}'")
+                    logger.debug(f"           [DATE EXTRACT] Trying extracted: '{extracted}'")
                     result = self._parse_date(extracted)  # Recursive call
                     if result:
                         return result
 
-        print(f"           [DATE PARSE FAILED] Could not parse: '{original_str}'")
+        logger.debug(f"           [DATE PARSE FAILED] Could not parse: '{original_str}'")
         return None
 
     def scrape_all_courses(self, progress_callback=None, save_per_course=False) -> list[dict]:
@@ -2943,23 +2949,29 @@ class LearningSuiteScraper:
             course_assignments = []
             existing_titles = set()
 
-            print(f"\n{'#' * 70}")
-            print(f"### PROCESSING COURSE: {course['name']} ({i+1}/{total_courses})")
-            print(f"{'#' * 70}")
+            logger.debug(f"\n{'#' * 70}")
+            logger.debug(f"### PROCESSING COURSE: {course['name']} ({i+1}/{total_courses})")
+            logger.debug(f"{'#' * 70}")
 
-            # SESSION CHECK: Before each course, verify session is still valid
-            if not self._check_session_valid():
-                logger.warning(f"Session invalid before scraping {course['name']}, attempting refresh...")
-                if not self._refresh_session():
-                    logger.error(f"Session refresh failed before {course['name']}, adding to retry queue")
-                    failed_courses.append((i, course))
-                    if progress_callback:
-                        progress_callback(i + 1, total_courses, f"{course['name']} (session error)")
-                    continue
+            # SESSION CHECK: Verify session periodically (every 5 courses or if never checked)
+            # Also always check the first course to catch expired sessions early
+            should_check = (i == 0 or i % 5 == 0 or
+                            not self._last_session_check or
+                            (time.time() - self._last_session_check) > 120)
+            if should_check:
+                if not self._check_session_valid():
+                    logger.warning(f"Session invalid before scraping {course['name']}, attempting refresh...")
+                    if not self._refresh_session():
+                        logger.error(f"Session refresh failed before {course['name']}, adding to retry queue")
+                        failed_courses.append((i, course))
+                        if progress_callback:
+                            progress_callback(i + 1, total_courses, f"{course['name']} (session error)")
+                        continue
+                self._last_session_check = time.time()
 
             # KEEP-ALIVE: Touch the base URL periodically to refresh session timer
-            # Do this every 2 courses to stay well within session timeout
-            if i > 0 and i % 2 == 0:
+            # Do this every 5 courses to stay well within session timeout
+            if i > 0 and i % 5 == 0:
                 self._keepalive()
 
             # PRIMARY SOURCE: Grades -> Assignments view
@@ -2991,29 +3003,25 @@ class LearningSuiteScraper:
                             progress_callback(i + 1, total_courses, f"{course['name']} (failed)")
                         continue
 
-            time.sleep(1)
-
             # SECONDARY: If Grades view returned very few items, also try Exams tab
             # This catches cases where exams are listed separately
             if len(grades_assignments) < 5:
-                print(f">>> Grades view found only {len(grades_assignments)} items, checking Exams tab...")
+                logger.debug(f">>> Grades view found only {len(grades_assignments)} items, checking Exams tab...")
                 try:
                     exams_assignments = self.scrape_exams_tab(course)
                     for exam in exams_assignments:
                         if exam["title"] not in existing_titles:
                             course_assignments.append(exam)
                             existing_titles.add(exam["title"])
-                            print(f"    [NEW FROM EXAMS] {exam['title']}")
+                            logger.debug(f"    [NEW FROM EXAMS] {exam['title']}")
                 except Exception as e:
                     logger.error(f"Error scraping exams tab for {course['name']}: {e}")
-
-                time.sleep(1)
 
             # Track course total
             course_totals[course['name']] = len(course_assignments)
 
-            print(f"\n>>> COURSE COMPLETE: {course['name']}")
-            print(f">>> Total assignments found: {len(course_assignments)}")
+            logger.debug(f"\n>>> COURSE COMPLETE: {course['name']}")
+            logger.debug(f">>> Total assignments found: {len(course_assignments)}")
 
             # Save this course's assignments to DB immediately if requested
             if save_per_course and course_assignments:
@@ -3029,14 +3037,14 @@ class LearningSuiteScraper:
         # RETRY FAILED COURSES: If any courses failed due to session issues, retry them
         if failed_courses:
             logger.info(f"Retrying {len(failed_courses)} failed courses...")
-            print(f"\n{'=' * 70}")
-            print(f"RETRYING {len(failed_courses)} FAILED COURSES")
-            print(f"{'=' * 70}")
+            logger.debug(f"\n{'=' * 70}")
+            logger.debug(f"RETRYING {len(failed_courses)} FAILED COURSES")
+            logger.debug(f"{'=' * 70}")
 
             # First, try to refresh the session
             if self._check_session_valid() or self._refresh_session():
                 for original_idx, course in failed_courses:
-                    print(f"\n### RETRY: {course['name']}")
+                    logger.debug(f"\n### RETRY: {course['name']}")
                     course_assignments = []
                     existing_titles = set()
 
@@ -3061,7 +3069,7 @@ class LearningSuiteScraper:
                                 pass
 
                         course_totals[course['name']] = len(course_assignments)
-                        print(f">>> RETRY COMPLETE: {course['name']} - {len(course_assignments)} assignments")
+                        logger.debug(f">>> RETRY COMPLETE: {course['name']} - {len(course_assignments)} assignments")
 
                         if save_per_course and course_assignments:
                             db_result = self.update_database(course_assignments)
@@ -3072,28 +3080,26 @@ class LearningSuiteScraper:
                     except Exception as e:
                         logger.error(f"Retry failed for {course['name']}: {e}")
                         course_totals[course['name']] = 0
-
-                    time.sleep(1)
             else:
                 logger.error("Cannot refresh session for retry, skipping failed courses")
                 for _, course in failed_courses:
                     course_totals[course['name']] = 0
 
         # Print final summary with totals per course
-        print("\n" + "=" * 70)
-        print("SCRAPING SUMMARY - ASSIGNMENTS PER COURSE")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.info("SCRAPING SUMMARY - ASSIGNMENTS PER COURSE")
+        logger.debug("=" * 70)
         for course_name, count in course_totals.items():
-            print(f"  {course_name}: {count} assignments")
+            logger.debug(f"  {course_name}: {count} assignments")
         if failed_courses:
-            print(f"\n  COURSES THAT FAILED: {len(failed_courses)}")
+            logger.debug(f"\n  COURSES THAT FAILED: {len(failed_courses)}")
             for _, course in failed_courses:
                 final_count = course_totals.get(course['name'], 0)
                 status = f"{final_count} assignments (recovered)" if final_count > 0 else "FAILED"
-                print(f"    - {course['name']}: {status}")
-        print("-" * 70)
-        print(f"  TOTAL: {len(all_assignments)} assignments")
-        print("=" * 70)
+                logger.debug(f"    - {course['name']}: {status}")
+        logger.debug("-" * 70)
+        logger.debug(f"  TOTAL: {len(all_assignments)} assignments")
+        logger.debug("=" * 70)
 
         logger.info(f"Total assignments scraped: {len(all_assignments)}")
         return all_assignments
@@ -3108,16 +3114,16 @@ class LearningSuiteScraper:
             Summary dictionary with counts
         """
         if not self.supabase:
-            print("\n[DB ERROR] Supabase client not initialized")
+            logger.error("Supabase client not initialized")
             return {"error": "Database not connected"}
 
         summary = {"new": 0, "modified": 0, "unchanged": 0, "errors": 0}
         now = datetime.now(timezone.utc).isoformat()
 
-        print("\n" + "=" * 70)
-        print(">>> UPDATING DATABASE")
-        print(f">>> Total assignments to process: {len(assignments)}")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.info("Updating database...")
+        logger.debug(f">>> Total assignments to process: {len(assignments)}")
+        logger.debug("=" * 70)
 
         for i, assignment in enumerate(assignments):
             try:
@@ -3136,12 +3142,12 @@ class LearningSuiteScraper:
                 raw_title = assignment.get("title", "")
                 assignment["title"] = html.unescape(raw_title)
 
-                print(f"\n--- DB Update {i+1}/{len(assignments)} ---")
-                print(f"    Title: '{assignment['title']}'")
-                print(f"    Course: '{assignment['course_name']}'")
-                print(f"    Status: '{assignment.get('status')}'")
+                logger.debug(f"\n--- DB Update {i+1}/{len(assignments)} ---")
+                logger.debug(f"    Title: '{assignment['title']}'")
+                logger.debug(f"    Course: '{assignment['course_name']}'")
+                logger.debug(f"    Status: '{assignment.get('status')}'")
                 if raw_link != sanitized_link:
-                    print(f"    Link (sanitized): {sanitized_link}")
+                    logger.debug(f"    Link (sanitized): {sanitized_link}")
 
                 # Check if assignment exists (match by title + course_name)
                 existing = self.supabase.table("assignments").select("*").eq(
@@ -3199,10 +3205,10 @@ class LearningSuiteScraper:
 
                     if is_modified:
                         summary["modified"] += 1
-                        print(f"    [DB] UPDATED (modified)")
+                        logger.debug(f"    [DB] UPDATED (modified)")
                     else:
                         summary["unchanged"] += 1
-                        print(f"    [DB] UNCHANGED")
+                        logger.debug(f"    [DB] UNCHANGED")
 
                 else:
                     # Insert new assignment
@@ -3224,25 +3230,25 @@ class LearningSuiteScraper:
                         "ls_cid": assignment.get("ls_cid"),
                     }
 
-                    print(f"    [DB] INSERTING NEW RECORD:")
-                    print(f"         Title: '{new_record['title']}'")
-                    print(f"         Course: '{new_record['course_name']}'")
-                    print(f"         Status: '{new_record['status']}'")
-                    print(f"         Due: {new_record['due_date']}")
-                    print(f"         CID: {new_record['ls_cid']}")
+                    logger.debug(f"    [DB] INSERTING NEW RECORD:")
+                    logger.debug(f"         Title: '{new_record['title']}'")
+                    logger.debug(f"         Course: '{new_record['course_name']}'")
+                    logger.debug(f"         Status: '{new_record['status']}'")
+                    logger.debug(f"         Due: {new_record['due_date']}")
+                    logger.debug(f"         CID: {new_record['ls_cid']}")
 
                     self.supabase.table("assignments").insert(new_record).execute()
                     summary["new"] += 1
-                    print(f"    [DB] INSERTED SUCCESSFULLY")
+                    logger.debug(f"    [DB] INSERTED SUCCESSFULLY")
 
             except Exception as e:
-                print(f"    [DB ERROR] Error updating assignment '{assignment.get('title')}': {e}")
+                logger.debug(f"    [DB ERROR] Error updating assignment '{assignment.get('title')}': {e}")
                 summary["errors"] += 1
 
-        print("\n" + "=" * 70)
-        print(f">>> DATABASE UPDATE COMPLETE")
-        print(f">>> New: {summary['new']}, Modified: {summary['modified']}, Unchanged: {summary['unchanged']}, Errors: {summary['errors']}")
-        print("=" * 70)
+        logger.debug("\n" + "=" * 70)
+        logger.debug(f">>> DATABASE UPDATE COMPLETE")
+        logger.debug(f">>> New: {summary['new']}, Modified: {summary['modified']}, Unchanged: {summary['unchanged']}, Errors: {summary['errors']}")
+        logger.debug("=" * 70)
         return summary
 
     def run(self, netid: str, password: str, update_db: bool = True) -> dict:
@@ -3267,21 +3273,21 @@ class LearningSuiteScraper:
 
         try:
             # Login
-            print("\n" + "=" * 70)
-            print(">>> STARTING LOGIN PROCESS")
-            print("=" * 70)
+            logger.debug("\n" + "=" * 70)
+            logger.info("Starting login process...")
+            logger.debug("=" * 70)
 
             if not self.login(netid, password):
                 result["error"] = "Login failed - check credentials or complete MFA"
                 self._save_debug_html("final_login_failed")
                 return result
 
-            print("\n>>> Login successful!")
+            logger.info("Login successful!")
 
             # Get courses
-            print("\n" + "=" * 70)
-            print(">>> GETTING COURSE LIST")
-            print("=" * 70)
+            logger.debug("\n" + "=" * 70)
+            logger.info("Getting course list...")
+            logger.debug("=" * 70)
 
             result["courses"] = self.get_courses()
 
@@ -3291,12 +3297,12 @@ class LearningSuiteScraper:
                 self._save_debug_html("no_courses_found")
                 return result
 
-            print(f"\n>>> Found {len(result['courses'])} courses")
+            logger.debug(f"\n>>> Found {len(result['courses'])} courses")
 
             # Scrape assignments
-            print("\n" + "=" * 70)
-            print(">>> SCRAPING ASSIGNMENTS FROM ALL COURSES")
-            print("=" * 70)
+            logger.debug("\n" + "=" * 70)
+            logger.info("Scraping assignments from all courses...")
+            logger.debug("=" * 70)
 
             result["assignments"] = self.scrape_all_courses()
 
@@ -3306,9 +3312,9 @@ class LearningSuiteScraper:
 
             # Update database if requested
             if update_db and result["assignments"]:
-                print("\n" + "=" * 70)
-                print(">>> UPDATING DATABASE")
-                print("=" * 70)
+                logger.debug("\n" + "=" * 70)
+                logger.info("Updating database...")
+                logger.debug("=" * 70)
                 result["summary"] = self.update_database(result["assignments"])
             elif update_db:
                 result["summary"] = {"new": 0, "modified": 0, "unchanged": 0, "errors": 0}
@@ -3316,15 +3322,15 @@ class LearningSuiteScraper:
             result["success"] = True
 
             # Final summary
-            print("\n" + "=" * 70)
-            print(">>> SCRAPING COMPLETE")
-            print(f">>> Courses: {len(result['courses'])}")
-            print(f">>> Assignments: {len(result['assignments'])}")
+            logger.debug("\n" + "=" * 70)
+            logger.info("Scraping complete")
+            logger.debug(f">>> Courses: {len(result['courses'])}")
+            logger.debug(f">>> Assignments: {len(result['assignments'])}")
             if result["warnings"]:
-                print(f">>> Warnings: {len(result['warnings'])}")
+                logger.debug(f">>> Warnings: {len(result['warnings'])}")
                 for w in result["warnings"]:
-                    print(f"    - {w}")
-            print("=" * 70)
+                    logger.debug(f"    - {w}")
+            logger.debug("=" * 70)
 
         except KeyboardInterrupt:
             result["error"] = "Scraping interrupted by user"

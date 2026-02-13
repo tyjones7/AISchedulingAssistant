@@ -21,7 +21,6 @@ function LoginPage({ onLoginSuccess }) {
           throw new Error('Failed to check login status')
         }
         const data = await response.json()
-        console.log('[LoginPage] Browser auth status:', data)
         setStatus(data.status)
 
         if (data.status === 'authenticated') {
@@ -63,7 +62,6 @@ function LoginPage({ onLoginSuccess }) {
       }
 
       const data = await response.json()
-      console.log('[LoginPage] Browser login started:', data)
       setTaskId(data.task_id)
       setStatus('waiting_for_login')
     } catch (err) {

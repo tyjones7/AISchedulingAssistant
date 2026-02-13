@@ -141,6 +141,13 @@ function AssignmentCard({
     }
   }
 
+  const handleCardKeyDown = (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && onOpenDetail) {
+      e.preventDefault()
+      onOpenDetail(assignment)
+    }
+  }
+
   const canMarkStarted = ['newly_assigned', 'not_started'].includes(assignment.status)
   const canMarkDone = ['newly_assigned', 'not_started', 'in_progress'].includes(assignment.status)
 
@@ -153,7 +160,14 @@ function AssignmentCard({
   ].filter(Boolean).join(' ')
 
   return (
-    <article className={cardClasses} onClick={handleCardClick}>
+    <article
+      className={cardClasses}
+      onClick={handleCardClick}
+      onKeyDown={onOpenDetail ? handleCardKeyDown : undefined}
+      tabIndex={onOpenDetail ? 0 : undefined}
+      role={onOpenDetail ? 'button' : undefined}
+      aria-label={onOpenDetail ? `View details for ${assignment.title}` : undefined}
+    >
       {/* Top row: title + time remaining */}
       <div className="card-top">
         <h3 className="card-title">{assignment.title}</h3>

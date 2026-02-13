@@ -25,17 +25,24 @@
   pointer-events: none;
 }
 
-/* Urgency left accent */
+/* Urgency visual escalation */
 .assignment-card.urgency-overdue {
   border-left: 3px solid var(--color-status-overdue);
+  background: linear-gradient(135deg, rgba(255, 59, 48, 0.04) 0%, var(--color-bg) 100%);
 }
 
 .assignment-card.urgency-today {
   border-left: 3px solid var(--color-status-today);
+  background: linear-gradient(135deg, rgba(255, 149, 0, 0.04) 0%, var(--color-bg) 100%);
 }
 
 .assignment-card.urgency-tomorrow {
   border-left: 3px solid #FFCC00;
+  background: linear-gradient(135deg, rgba(255, 204, 0, 0.03) 0%, var(--color-bg) 100%);
+}
+
+.assignment-card.urgency-soon {
+  border-left: 3px solid var(--color-accent);
 }
 
 /* ============================================

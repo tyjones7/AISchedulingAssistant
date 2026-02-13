@@ -5,11 +5,15 @@ Manages browser-based authentication where users log in directly on BYU's site.
 We store the authenticated session state, not passwords.
 """
 
+import json
+import os
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from enum import Enum
+
+_SESSION_FILE = os.path.join(os.path.dirname(__file__), ".session_data.json")
 
 
 class BrowserAuthStatus(str, Enum):
@@ -29,7 +33,7 @@ class BrowserAuthTask:
         self.task_id = task_id
         self.status = BrowserAuthStatus.PENDING
         self.error: Optional[str] = None
-        self.started_at = datetime.now()
+        self.started_at = datetime.now(timezone.utc)
         self.completed_at: Optional[datetime] = None
         self.scraper = None  # Will hold the authenticated scraper
 
@@ -49,6 +53,45 @@ _dynamic_base_url: str = ""
 # Web storage data (localStorage/sessionStorage) for session persistence
 _local_storage: dict = {}
 _session_storage: dict = {}
+
+
+def _save_session():
+    """Persist session data (cookies, base_url, web storage) to disk."""
+    data = {
+        "cookies": _session_cookies,
+        "dynamic_base_url": _dynamic_base_url,
+        "local_storage": _local_storage,
+        "session_storage": _session_storage,
+    }
+    try:
+        with open(_SESSION_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _load_session():
+    """Load persisted session data from disk at module import time."""
+    global _session_cookies, _dynamic_base_url, _is_authenticated
+    global _local_storage, _session_storage
+    if not os.path.exists(_SESSION_FILE):
+        return
+    try:
+        with open(_SESSION_FILE, "r") as f:
+            data = json.load(f)
+        cookies = data.get("cookies", [])
+        base_url = data.get("dynamic_base_url", "")
+        if cookies and base_url:
+            _session_cookies = cookies
+            _dynamic_base_url = base_url
+            _local_storage = data.get("local_storage", {})
+            _session_storage = data.get("session_storage", {})
+            _is_authenticated = True
+    except Exception:
+        pass
+
+
+_load_session()
 
 
 def create_browser_auth_task() -> str:
@@ -80,7 +123,7 @@ def update_browser_auth_status(task_id: str, status: BrowserAuthStatus, error: O
             if error:
                 task.error = error
             if status in [BrowserAuthStatus.AUTHENTICATED, BrowserAuthStatus.FAILED]:
-                task.completed_at = datetime.now()
+                task.completed_at = datetime.now(timezone.utc)
 
 
 def set_authenticated(scraper=None):
@@ -101,6 +144,7 @@ def set_session_data(cookies: list, dynamic_base_url: str):
     _dynamic_base_url = dynamic_base_url
     _is_authenticated = True
     _authenticated_scraper = None  # No live scraper — we use cookies instead
+    _save_session()
 
 
 def set_web_storage(local_storage: dict, session_storage: dict):
@@ -112,6 +156,7 @@ def set_web_storage(local_storage: dict, session_storage: dict):
     global _local_storage, _session_storage
     _local_storage = local_storage or {}
     _session_storage = session_storage or {}
+    _save_session()
 
 
 def get_web_storage() -> tuple:
@@ -157,3 +202,7 @@ def clear_authentication():
     _dynamic_base_url = ""
     _local_storage = {}
     _session_storage = {}
+    try:
+        os.remove(_SESSION_FILE)
+    except FileNotFoundError:
+        pass

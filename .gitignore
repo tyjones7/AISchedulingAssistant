@@ -3,6 +3,7 @@ backend/venv/
 __pycache__/
 *.py[cod]
 .env
+backend/.session_data.json
 
 # Node
 frontend/node_modules/

@@ -331,6 +331,9 @@ def update_assignment(assignment_id: str, update: AssignmentUpdate):
     if update.notes is not None:
         update_data["notes"] = update.notes
 
+    if update.estimated_minutes is not None and not (1 <= update.estimated_minutes <= 1440):
+        raise HTTPException(status_code=422, detail="estimated_minutes must be between 1 and 1440")
+
     # Allow clearing planning fields with empty string
     if update.planned_start == "":
         update_data["planned_start"] = None
