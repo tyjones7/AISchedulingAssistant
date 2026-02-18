@@ -46,7 +46,7 @@ function App() {
       const response = await fetch(`${API_BASE}/auth/status`)
       if (response.ok) {
         const data = await response.json()
-        setIsAuthenticated(data.authenticated)
+        setIsAuthenticated(data.authenticated || data.canvas_connected)
       } else {
         setIsAuthenticated(false)
       }

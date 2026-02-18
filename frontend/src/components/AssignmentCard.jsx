@@ -181,6 +181,11 @@ function AssignmentCard({
       {/* Meta row: course + status + estimated time */}
       <div className="card-meta">
         <span className="card-course">{assignment.course_name}</span>
+        {assignment.source && (
+          <span className={`source-badge source-${assignment.source === 'canvas' ? 'canvas' : 'ls'}`}>
+            {assignment.source === 'canvas' ? 'Canvas' : 'LS'}
+          </span>
+        )}
         <span className={`card-status status-${assignment.status}`}>
           {STATUS_LABELS[assignment.status]}
         </span>
@@ -221,7 +226,7 @@ function AssignmentCard({
               target="_blank"
               rel="noopener noreferrer"
               className="quick-action-btn action-open"
-              title="Open in Learning Suite"
+              title={assignment.source === 'canvas' ? 'Open in Canvas' : 'Open in Learning Suite'}
               onClick={(e) => e.stopPropagation()}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

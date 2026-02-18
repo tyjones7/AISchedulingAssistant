@@ -10,6 +10,7 @@ from supabase import create_client
 
 from sync_service import sync_service
 import auth_store
+import canvas_auth_store
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -56,6 +57,11 @@ class LoginRequest(BaseModel):
 class AuthStatusResponse(BaseModel):
     authenticated: bool
     netid: Optional[str] = None
+    canvas_connected: bool = False
+
+
+class CanvasTokenRequest(BaseModel):
+    token: str
 
 
 load_dotenv()
@@ -237,11 +243,12 @@ def browser_auth_status(task_id: str):
 
 @app.get("/auth/status", response_model=AuthStatusResponse)
 def auth_status():
-    """Check if user is authenticated."""
+    """Check if user is authenticated (LS and/or Canvas)."""
     is_auth = auth_store.is_authenticated()
     return AuthStatusResponse(
         authenticated=is_auth,
-        netid=None  # We don't store netid with browser auth
+        netid=None,  # We don't store netid with browser auth
+        canvas_connected=canvas_auth_store.is_connected(),
     )
 
 
@@ -250,7 +257,43 @@ def logout():
     """Clear authentication and close browser session."""
     logger.info("POST /auth/logout - Clearing authentication")
     auth_store.clear_authentication()
+    canvas_auth_store.clear_token()
     return {"success": True, "message": "Logged out"}
+
+
+# ============== CANVAS AUTH ROUTES ==============
+
+@app.post("/auth/canvas-token")
+def set_canvas_token(req: CanvasTokenRequest):
+    """Validate and store a Canvas API token."""
+    token = req.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token is required")
+
+    valid, result = canvas_auth_store.validate_token(token)
+    if not valid:
+        raise HTTPException(status_code=401, detail=result)
+
+    canvas_auth_store.set_token(token, result)
+    logger.info(f"POST /auth/canvas-token - Connected as {result}")
+    return {"success": True, "user_name": result}
+
+
+@app.get("/auth/canvas-status")
+def canvas_status():
+    """Check if Canvas is connected."""
+    return {
+        "connected": canvas_auth_store.is_connected(),
+        "user_name": canvas_auth_store.get_user_name(),
+    }
+
+
+@app.delete("/auth/canvas-token")
+def delete_canvas_token():
+    """Disconnect Canvas."""
+    canvas_auth_store.clear_token()
+    logger.info("DELETE /auth/canvas-token - Disconnected")
+    return {"success": True}
 
 
 @app.get("/assignments")

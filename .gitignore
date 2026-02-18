@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 .env
 backend/.session_data.json
+backend/.canvas_token.json
 
 # Node
 frontend/node_modules/

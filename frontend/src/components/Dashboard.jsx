@@ -493,7 +493,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
             </div>
             <div className="welcome-text">
               <strong>Welcome to CampusAI</strong>
-              <span>Click Sync to import your Learning Suite assignments.</span>
+              <span>Click Sync to import your assignments.</span>
             </div>
           </div>
         )}
@@ -527,7 +527,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
               </svg>
             </div>
             <h3 className="empty-state-title">No assignments found</h3>
-            <p className="empty-state-desc">Try syncing again or check your Learning Suite courses.</p>
+            <p className="empty-state-desc">Try syncing again or check your Learning Suite / Canvas courses.</p>
           </div>
         )}
       </main>

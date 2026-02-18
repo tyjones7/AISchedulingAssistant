@@ -238,7 +238,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
         className={buttonClasses}
         onClick={handleSync}
         disabled={syncing}
-        title={syncing ? 'Syncing...' : 'Sync with Learning Suite'}
+        title={syncing ? 'Syncing...' : 'Sync assignments'}
       >
         <span className={`sync-icon ${syncing ? 'is-spinning' : ''}`}>
           <svg
