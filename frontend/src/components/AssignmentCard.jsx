@@ -24,6 +24,7 @@ function AssignmentCard({
   onOpenDetail,
   isUpdating,
   compact = false,
+  suggestion = null,
 }) {
   const tz = 'America/Denver'
 
@@ -151,6 +152,22 @@ function AssignmentCard({
   const canMarkStarted = ['newly_assigned', 'not_started'].includes(assignment.status)
   const canMarkDone = ['newly_assigned', 'not_started', 'in_progress'].includes(assignment.status)
 
+  // AI suggested start pill
+  const getSuggestedStartInfo = (s) => {
+    if (!s?.suggested_start) return null
+    const start = new Date(s.suggested_start + 'T00:00:00')
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const diff = Math.round((start - today) / 86400000)
+    if (diff < 0) return { label: 'Start now', urgency: 'high' }
+    if (diff === 0) return { label: 'Start today', urgency: 'high' }
+    if (diff === 1) return { label: 'Start tomorrow', urgency: 'medium' }
+    return {
+      label: `Start ${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+      urgency: 'low',
+    }
+  }
+  const startInfo = getSuggestedStartInfo(suggestion)
+
   const cardClasses = [
     'assignment-card',
     isUpdating && 'is-updating',
@@ -195,6 +212,14 @@ function AssignmentCard({
               ? `${Math.floor(assignment.estimated_minutes / 60)}h ${assignment.estimated_minutes % 60 > 0 ? (assignment.estimated_minutes % 60) + 'm' : ''}`
               : `${assignment.estimated_minutes}m`
             }
+          </span>
+        )}
+        {startInfo && (
+          <span
+            className={`ai-start-pill ai-start-${startInfo.urgency}`}
+            title={suggestion.rationale || `AI suggestion: ${startInfo.label}`}
+          >
+            {startInfo.label}
           </span>
         )}
       </div>

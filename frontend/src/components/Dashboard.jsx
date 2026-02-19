@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import AssignmentCard from './AssignmentCard'
 import AssignmentDetail from './AssignmentDetail'
 import SyncButton from './SyncButton'
+import AIBriefing from './AIBriefing'
+import AIChat from './AIChat'
 import { ToastContainer } from './Toast'
 import { API_BASE } from '../config/api'
 import './Dashboard.css'
@@ -58,6 +60,11 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
   // Later section collapsed by default
   const [laterCollapsed, setLaterCollapsed] = useState(true)
 
+  // AI features
+  const [suggestions, setSuggestions] = useState({})
+  const [briefing, setBriefing] = useState(null)
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false)
+
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now()
     setToasts((prev) => [...prev, { id, message, type }])
@@ -70,6 +77,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
   useEffect(() => {
     fetchAssignments()
     fetchLastSync()
+    fetchSuggestions()
   }, [])
 
   // Handle auto-sync after login
@@ -125,6 +133,57 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
       console.error('[Dashboard] Error fetching last sync:', err)
     }
   }
+
+  const fetchSuggestions = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/ai/suggestions`)
+      if (!response.ok) return
+      const data = await response.json()
+      const map = {}
+      for (const s of (data.suggestions || [])) {
+        map[s.assignment_id] = s
+      }
+      setSuggestions(map)
+    } catch (err) {
+      console.error('[Dashboard] Failed to fetch AI suggestions:', err)
+    }
+  }
+
+  const handleGenerateAI = useCallback(async () => {
+    if (isGeneratingAI) return
+    setIsGeneratingAI(true)
+    try {
+      const [suggestionsRes, briefingRes] = await Promise.all([
+        fetch(`${API_BASE}/ai/suggestions/generate`, { method: 'POST' }),
+        fetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' }),
+      ])
+
+      if (suggestionsRes.ok) {
+        const data = await suggestionsRes.json()
+        const map = {}
+        for (const s of (data.suggestions || [])) {
+          map[s.assignment_id] = s
+        }
+        setSuggestions(map)
+      }
+
+      if (briefingRes.ok) {
+        const data = await briefingRes.json()
+        setBriefing(data.briefing || null)
+      }
+
+      if (suggestionsRes.ok || briefingRes.ok) {
+        addToast('AI plan generated!', 'success')
+      } else {
+        addToast('AI generation failed. Make sure GROQ_API_KEY is set.', 'error')
+      }
+    } catch (err) {
+      console.error('[Dashboard] handleGenerateAI error:', err)
+      addToast('AI generation failed. Check your connection.', 'error')
+    } finally {
+      setIsGeneratingAI(false)
+    }
+  }, [isGeneratingAI, addToast])
 
   const handleSyncProgress = useCallback((data) => {
     setSyncStatus(data)
@@ -295,6 +354,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
       onMarkDone={handleMarkDone}
       onOpenDetail={handleOpenDetail}
       isUpdating={updatingIds.has(assignment.id)}
+      suggestion={suggestions[assignment.id] || null}
       compact
     />
   )
@@ -432,6 +492,21 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
             <span className="brand-name">CampusAI</span>
           </div>
           <div className="dash-header-actions">
+            <button
+              className="ai-plan-btn"
+              onClick={handleGenerateAI}
+              disabled={isGeneratingAI}
+              title="Generate AI study plan"
+            >
+              {isGeneratingAI ? (
+                <span className="ai-plan-spinner" aria-hidden="true" />
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3l1.88 5.76a1 1 0 0 0 .95.69h6.06l-4.9 3.56a1 1 0 0 0-.36 1.12L17.5 20l-4.9-3.56a1 1 0 0 0-1.18 0L6.5 20l1.87-5.87a1 1 0 0 0-.36-1.12L3.11 9.45h6.06a1 1 0 0 0 .95-.69L12 3z" />
+                </svg>
+              )}
+              <span>AI Plan</span>
+            </button>
             <SyncButton
               onSyncComplete={handleSyncComplete}
               triggerSync={triggerSync}
@@ -510,6 +585,9 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
           </div>
         )}
 
+        {/* AI Briefing panel */}
+        <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
+
         {/* Timeline */}
         <div className="timeline">
           {TIMELINE_SECTIONS.map(renderTimelineGroup)}
@@ -540,6 +618,8 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
           onUpdate={handleAssignmentUpdate}
         />
       )}
+
+      <AIChat addToast={addToast} />
 
       <ToastContainer toasts={toasts} removeToast={removeToast} />
     </div>

@@ -432,3 +432,38 @@
     height: 14px;
   }
 }
+
+/* ============================================
+   AI Suggested Start Pill
+   ============================================ */
+
+.ai-start-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+  line-height: 1.4;
+}
+
+/* "Start now" / "Start today" — red/urgent */
+.ai-start-high {
+  background: var(--color-status-overdue-bg, rgba(255, 59, 48, 0.08));
+  color: var(--color-status-overdue, #FF3B30);
+}
+
+/* "Start tomorrow" — orange/medium */
+.ai-start-medium {
+  background: var(--color-status-today-bg, rgba(255, 149, 0, 0.08));
+  color: #CC7700;
+}
+
+/* "Start Feb 21" etc. — blue/relaxed */
+.ai-start-low {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}

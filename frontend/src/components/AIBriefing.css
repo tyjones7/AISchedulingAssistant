@@ -1,0 +1,135 @@
+/* ============================================
+   AI Briefing Panel — Daily Plan Summary
+   ============================================ */
+
+.ai-briefing {
+  border: 1px solid rgba(0, 113, 227, 0.2);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    135deg,
+    rgba(0, 113, 227, 0.04) 0%,
+    rgba(88, 86, 214, 0.04) 100%
+  );
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+}
+
+.ai-briefing.is-empty {
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+/* ---- Header (always visible, clickable) ---- */
+
+.ai-briefing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  gap: var(--space-2);
+  transition: background var(--transition-fast);
+}
+
+.ai-briefing-header:hover {
+  background: rgba(0, 113, 227, 0.04);
+}
+
+.ai-briefing-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-briefing-icon {
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.ai-briefing-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.ai-briefing-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+}
+
+.ai-briefing-hint.is-generating {
+  color: var(--color-accent);
+}
+
+.ai-briefing-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
+}
+
+.ai-briefing-chevron.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+/* ---- Content area ---- */
+
+.ai-briefing-content {
+  padding: 0 var(--space-4) var(--space-3);
+  animation: briefing-expand 0.15s ease;
+}
+
+@keyframes briefing-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ai-briefing-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  margin: 0;
+  white-space: pre-line;
+}
+
+/* ---- Skeleton loading ---- */
+
+.ai-briefing-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.skeleton-line {
+  height: 14px;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-tertiary) 25%,
+    rgba(0, 0, 0, 0.04) 50%,
+    var(--color-bg-tertiary) 75%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-sm);
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-line.short {
+  width: 65%;
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

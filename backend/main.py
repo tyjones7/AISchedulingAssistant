@@ -1,7 +1,9 @@
 import os
+import json
 import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
 from datetime import datetime, timedelta, timezone
@@ -11,6 +13,7 @@ from supabase import create_client
 from sync_service import sync_service
 import auth_store
 import canvas_auth_store
+import ai_service
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +65,41 @@ class AuthStatusResponse(BaseModel):
 
 class CanvasTokenRequest(BaseModel):
     token: str
+
+
+# ============== AI MODELS ==============
+
+class AISuggestion(BaseModel):
+    id: str
+    assignment_id: str
+    priority_score: int
+    suggested_start: Optional[str] = None
+    rationale: Optional[str] = None
+    estimated_minutes: Optional[int] = None
+    generated_at: str
+
+
+class AISuggestionsResponse(BaseModel):
+    suggestions: list[AISuggestion]
+    generated_at: str
+
+
+class AIBriefingResponse(BaseModel):
+    briefing: str
+    generated_at: str
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AIChatRequest(BaseModel):
+    messages: list[ChatMessage]
+
+
+class AIApplyPlanRequest(BaseModel):
+    messages: list[ChatMessage]
 
 
 load_dotenv()
@@ -453,6 +491,225 @@ def get_last_sync():
 
     logger.debug(f"GET /sync/last - Found: {last_sync.get('last_sync_at')}")
     return {"last_sync": last_sync}
+
+
+# ============== AI ROUTES ==============
+
+def _fetch_active_assignments() -> list[dict]:
+    """Shared helper: fetch active assignments for AI context."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    response = (
+        supabase.table("assignments")
+        .select("id, title, course_name, due_date, status, estimated_minutes, notes")
+        .or_(f"status.neq.submitted,due_date.gte.{now_iso}")
+        .neq("status", "unavailable")
+        .execute()
+    )
+    return response.data or []
+
+
+def _ai_error_to_http(e: Exception) -> HTTPException:
+    """Translate ai_service exceptions into appropriate HTTP errors."""
+    msg = str(e)
+    if isinstance(e, RuntimeError):
+        return HTTPException(status_code=503, detail=msg)
+    if isinstance(e, ValueError):
+        return HTTPException(status_code=502, detail=msg)
+    if "rate_limit" in msg.lower() or "429" in msg:
+        return HTTPException(
+            status_code=429,
+            detail="AI rate limit reached. Please wait a moment and try again.",
+        )
+    return HTTPException(status_code=502, detail=f"AI API error: {msg}")
+
+
+@app.get("/ai/suggestions", response_model=AISuggestionsResponse)
+def get_ai_suggestions():
+    """Return the latest cached AI suggestion per assignment."""
+    try:
+        response = (
+            supabase.table("ai_suggestions")
+            .select("*")
+            .order("generated_at", desc=True)
+            .execute()
+        )
+        all_suggestions = response.data or []
+
+        # Deduplicate: keep only the most recent row per assignment_id
+        seen: set[str] = set()
+        latest = []
+        for s in all_suggestions:
+            aid = s.get("assignment_id")
+            if aid and aid not in seen:
+                seen.add(aid)
+                latest.append(s)
+
+        logger.debug(f"GET /ai/suggestions - {len(latest)} suggestion(s)")
+        return AISuggestionsResponse(
+            suggestions=latest,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception as e:
+        logger.error(f"GET /ai/suggestions failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch suggestions: {e}")
+
+
+@app.post("/ai/suggestions/generate", response_model=AISuggestionsResponse)
+def generate_ai_suggestions():
+    """Generate fresh AI priority suggestions for all active assignments.
+
+    Synchronous: waits for Groq (~3–8s). Saves results to ai_suggestions table.
+    """
+    logger.info("POST /ai/suggestions/generate")
+
+    assignments = _fetch_active_assignments()
+    if not assignments:
+        return AISuggestionsResponse(
+            suggestions=[],
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    try:
+        raw = ai_service.generate_suggestions(assignments)
+    except Exception as e:
+        raise _ai_error_to_http(e)
+
+    # Validate and normalize
+    now_iso = datetime.now(timezone.utc).isoformat()
+    valid_ids = {a["id"] for a in assignments}
+    rows = []
+    for s in raw:
+        aid = s.get("assignment_id", "")
+        score = s.get("priority_score")
+        if aid not in valid_ids:
+            logger.warning(f"Skipping suggestion with unknown assignment_id: {aid}")
+            continue
+        if not isinstance(score, int) or not (1 <= score <= 10):
+            logger.warning(f"Skipping suggestion with invalid score {score!r} for {aid}")
+            continue
+        rows.append({
+            "assignment_id": aid,
+            "priority_score": score,
+            "suggested_start": s.get("suggested_start"),
+            "rationale": (s.get("rationale") or "")[:200],
+            "estimated_minutes": s.get("estimated_minutes"),
+            "generated_at": now_iso,
+        })
+
+    if not rows:
+        raise HTTPException(status_code=502, detail="AI returned no valid suggestions. Try again.")
+
+    try:
+        saved = supabase.table("ai_suggestions").insert(rows).execute()
+        logger.info(f"POST /ai/suggestions/generate - saved {len(saved.data)} suggestion(s)")
+    except Exception as e:
+        logger.error(f"POST /ai/suggestions/generate - DB insert failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save suggestions: {e}")
+
+    return AISuggestionsResponse(suggestions=saved.data, generated_at=now_iso)
+
+
+@app.post("/ai/briefing/generate", response_model=AIBriefingResponse)
+def generate_ai_briefing():
+    """Generate a natural-language daily plan briefing (~2s)."""
+    logger.info("POST /ai/briefing/generate")
+
+    assignments = _fetch_active_assignments()
+    if not assignments:
+        return AIBriefingResponse(
+            briefing="No active assignments found. Enjoy the free time!",
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    try:
+        briefing = ai_service.generate_briefing(assignments)
+    except Exception as e:
+        raise _ai_error_to_http(e)
+
+    return AIBriefingResponse(
+        briefing=briefing,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@app.post("/ai/chat")
+async def ai_chat(req: AIChatRequest):
+    """Streaming SSE chat endpoint. Returns text/event-stream.
+
+    Each SSE event: data: {"delta": "..."}\n\n
+    Final event:   data: [DONE]\n\n
+    Error event:   data: {"error": "...", "code": N}\n\n
+    """
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="messages list cannot be empty")
+
+    assignments = _fetch_active_assignments()
+    messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
+
+    logger.info(f"POST /ai/chat - {len(req.messages)} message(s)")
+
+    def event_stream():
+        try:
+            for chunk in ai_service.chat_stream(messages_dicts, assignments):
+                yield f"data: {json.dumps({'delta': chunk})}\n\n"
+        except RuntimeError as e:
+            yield f"data: {json.dumps({'error': str(e), 'code': 503})}\n\n"
+        except Exception as e:
+            msg = str(e)
+            code = 429 if ("rate_limit" in msg.lower() or "429" in msg) else 502
+            yield f"data: {json.dumps({'error': msg, 'code': code})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/ai/apply-plan")
+def ai_apply_plan(req: AIApplyPlanRequest):
+    """Extract a study plan from the conversation and write planned_start to assignments.
+
+    Returns: {updated: N, assignments: [{id, planned_start}]}
+    """
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="messages list cannot be empty")
+
+    logger.info(f"POST /ai/apply-plan - {len(req.messages)} message(s)")
+
+    assignments = _fetch_active_assignments()
+    messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
+
+    try:
+        plan_items = ai_service.extract_plan(messages_dicts, assignments)
+    except Exception as e:
+        raise _ai_error_to_http(e)
+
+    if not plan_items:
+        raise HTTPException(
+            status_code=422,
+            detail="No study plan found in the conversation. Ask the AI to build a specific schedule first.",
+        )
+
+    valid_ids = {a["id"] for a in assignments}
+    updated = []
+    for item in plan_items:
+        aid = item.get("assignment_id", "")
+        planned_start = item.get("planned_start")
+        if aid not in valid_ids or not planned_start:
+            continue
+        try:
+            supabase.table("assignments").update(
+                {"planned_start": planned_start}
+            ).eq("id", aid).execute()
+            updated.append({"id": aid, "planned_start": planned_start})
+        except Exception as e:
+            logger.warning(f"POST /ai/apply-plan - failed to update {aid}: {e}")
+
+    logger.info(f"POST /ai/apply-plan - updated {len(updated)} assignment(s)")
+    return {"updated": len(updated), "assignments": updated}
 
 
 @app.on_event("startup")
