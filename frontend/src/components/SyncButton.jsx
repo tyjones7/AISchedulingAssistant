@@ -29,12 +29,9 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
   // Handle external trigger to start sync (e.g., after login)
   useEffect(() => {
     if (triggerSync && !syncing) {
-      handleSync()
-      if (onSyncStarted) {
-        onSyncStarted()
-      }
+      handleSync() // handleSync() already calls onSyncStarted internally
     }
-  }, [triggerSync, syncing, onSyncStarted])
+  }, [triggerSync, syncing])
 
   useEffect(() => {
     if (!taskId || !syncing) return
@@ -225,10 +222,16 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
 
         {!syncing && !error && lastSync && (
           <>
-            {isStale() && <span className="stale-indicator">Outdated</span>}
-            <span className={`last-sync-text ${isStale() ? 'is-stale' : ''}`}>
-              Synced {formatLastSync()}
-            </span>
+            {lastSync.last_sync_status === 'failed' ? (
+              <span className="sync-error-text">Last sync failed</span>
+            ) : (
+              <>
+                {isStale() && <span className="stale-indicator">Outdated</span>}
+                <span className={`last-sync-text ${isStale() ? 'is-stale' : ''}`}>
+                  Synced {formatLastSync()}
+                </span>
+              </>
+            )}
           </>
         )}
       </div>

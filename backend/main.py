@@ -1,6 +1,6 @@
 import os
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Literal, Optional
@@ -297,8 +297,14 @@ def delete_canvas_token():
 
 
 @app.get("/assignments")
-def get_assignments():
-    response = supabase.table("assignments").select("*").order("due_date").execute()
+def get_assignments(exclude_past_submitted: bool = Query(default=False)):
+    """Get assignments. Pass exclude_past_submitted=true to skip submitted past-due items."""
+    query = supabase.table("assignments").select("*").order("due_date")
+    if exclude_past_submitted:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        # Return assignments where status is not submitted, OR due_date is in the future
+        query = query.or_(f"status.neq.submitted,due_date.gte.{now_iso}")
+    response = query.execute()
     return {"assignments": response.data}
 
 

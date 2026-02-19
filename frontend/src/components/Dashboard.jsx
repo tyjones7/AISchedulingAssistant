@@ -98,7 +98,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
 
   const fetchAssignments = async () => {
     try {
-      const response = await fetch(`${API_BASE}/assignments`)
+      const response = await fetch(`${API_BASE}/assignments?exclude_past_submitted=true`)
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
