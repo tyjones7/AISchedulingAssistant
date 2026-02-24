@@ -210,6 +210,11 @@
   color: var(--color-text-tertiary);
 }
 
+.card-estimate-ai {
+  color: #818cf8;
+  font-style: italic;
+}
+
 /* ============================================
    Due Date
    ============================================ */

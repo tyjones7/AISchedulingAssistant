@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import AssignmentCard from './AssignmentCard'
 import AssignmentDetail from './AssignmentDetail'
 import SyncButton from './SyncButton'
 import AIBriefing from './AIBriefing'
 import AIChat from './AIChat'
+import ProactivePlan from './ProactivePlan'
 import { ToastContainer } from './Toast'
 import { API_BASE } from '../config/api'
 import './Dashboard.css'
@@ -41,7 +42,13 @@ const TIMELINE_SECTIONS = [
   { key: 'later', label: 'Later', urgency: 'normal', collapsible: true },
 ]
 
-function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
+const INVOLVEMENT_OPTIONS = [
+  { value: 'proactive',   label: 'Proactive' },
+  { value: 'balanced',    label: 'Balanced' },
+  { value: 'prompt_only', label: 'On demand' },
+]
+
+function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, onPreferencesChange }) {
   const [assignments, setAssignments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -64,6 +71,25 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
   const [suggestions, setSuggestions] = useState({})
   const [briefing, setBriefing] = useState(null)
   const [isGeneratingAI, setIsGeneratingAI] = useState(false)
+
+  const involvementLevel = preferences?.involvement_level ?? 'balanced'
+  const openChatRef = useRef(null)
+
+  const handleInvolvementChange = async (level) => {
+    try {
+      const res = await fetch(`${API_BASE}/preferences`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ involvement_level: level }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        onPreferencesChange?.(updated)
+      }
+    } catch {
+      addToast('Failed to save preference.', 'error')
+    }
+  }
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now()
@@ -492,6 +518,20 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
             <span className="brand-name">CampusAI</span>
           </div>
           <div className="dash-header-actions">
+            {/* AI involvement selector */}
+            {preferences && (
+              <div className="involvement-selector" title="AI involvement level">
+                {INVOLVEMENT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={`involvement-opt ${involvementLevel === opt.value ? 'active' : ''}`}
+                    onClick={() => handleInvolvementChange(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               className="ai-plan-btn"
               onClick={handleGenerateAI}
@@ -585,6 +625,16 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
           </div>
         )}
 
+        {/* Proactive AI plan card */}
+        <ProactivePlan
+          suggestions={suggestions}
+          assignments={assignments}
+          involvementLevel={involvementLevel}
+          onOpenChat={() => openChatRef.current?.()}
+          onPlanApplied={fetchAssignments}
+          addToast={addToast}
+        />
+
         {/* AI Briefing panel */}
         <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
 
@@ -619,7 +669,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout }) {
         />
       )}
 
-      <AIChat addToast={addToast} />
+      <AIChat addToast={addToast} involvementLevel={involvementLevel} openChatRef={openChatRef} />
 
       <ToastContainer toasts={toasts} removeToast={removeToast} />
     </div>

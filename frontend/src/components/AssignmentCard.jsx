@@ -214,6 +214,14 @@ function AssignmentCard({
             }
           </span>
         )}
+        {!assignment.estimated_minutes && suggestion?.estimated_minutes && (
+          <span className="card-estimate card-estimate-ai" title="AI time estimate">
+            ~{suggestion.estimated_minutes >= 60
+              ? `${Math.floor(suggestion.estimated_minutes / 60)}h ${suggestion.estimated_minutes % 60 > 0 ? (suggestion.estimated_minutes % 60) + 'm' : ''}`
+              : `${suggestion.estimated_minutes}m`
+            } AI
+          </span>
+        )}
         {startInfo && (
           <span
             className={`ai-start-pill ai-start-${startInfo.urgency}`}

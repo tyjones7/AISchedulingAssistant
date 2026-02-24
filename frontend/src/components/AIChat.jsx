@@ -3,6 +3,7 @@ import { API_BASE } from '../config/api'
 import './AIChat.css'
 
 const STORAGE_KEY = 'campus-ai-chat'
+const BRIEFING_DATE_KEY = 'campus-ai-briefing-date'
 
 const QUICK_CHIPS = [
   "What's most urgent right now?",
@@ -11,7 +12,7 @@ const QUICK_CHIPS = [
   'How long will everything take this week?',
 ]
 
-function AIChat({ addToast }) {
+function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState(() => {
     try {
@@ -28,6 +29,12 @@ function AIChat({ addToast }) {
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const briefingLoadedRef = useRef(false)
+
+  // Expose open() to parent via ref so ProactivePlan can open the chat
+  useEffect(() => {
+    if (openChatRef) openChatRef.current = () => setIsOpen(true)
+  }, [openChatRef])
 
   // Persist conversation to localStorage on every change
   useEffect(() => {
@@ -37,6 +44,44 @@ function AIChat({ addToast }) {
       // Ignore storage errors
     }
   }, [messages])
+
+  // Proactive day overview: inject briefing as first message when chat opens
+  // for the first time today (proactive or balanced involvement levels).
+  useEffect(() => {
+    if (!isOpen) return
+    if (involvementLevel === 'prompt_only') return
+    if (briefingLoadedRef.current) return
+    briefingLoadedRef.current = true
+
+    const today = new Date().toDateString()
+    const lastBriefingDate = localStorage.getItem(BRIEFING_DATE_KEY)
+
+    // Only inject once per day, and only when there are no existing messages for today
+    const hasMessagesToday = messages.length > 0 && lastBriefingDate === today
+    if (hasMessagesToday) return
+
+    const loadBriefing = async () => {
+      setIsLoading(true)
+      setMessages([{ role: 'assistant', content: '' }])
+      try {
+        const res = await fetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' })
+        if (res.ok) {
+          const data = await res.json()
+          const greeting = data.briefing || "Here's your schedule overview for today."
+          setMessages([{ role: 'assistant', content: greeting }])
+          localStorage.setItem(BRIEFING_DATE_KEY, today)
+        } else {
+          setMessages([])
+        }
+      } catch {
+        setMessages([])
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadBriefing()
+  }, [isOpen, involvementLevel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll to bottom when messages update or panel opens
   useEffect(() => {
@@ -182,7 +227,11 @@ function AIChat({ addToast }) {
   const handleClear = () => {
     setMessages([])
     setHasPlan(false)
-    try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
+    briefingLoadedRef.current = false
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(BRIEFING_DATE_KEY)
+    } catch { /* ignore */ }
   }
 
   const handleApplyPlan = async () => {

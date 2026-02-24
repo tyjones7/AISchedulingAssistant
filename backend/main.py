@@ -102,6 +102,28 @@ class AIApplyPlanRequest(BaseModel):
     messages: list[ChatMessage]
 
 
+class PushSubscription(BaseModel):
+    endpoint: str
+    keys: dict  # {p256dh: str, auth: str}
+
+
+class UserPreferences(BaseModel):
+    id: Optional[str] = None
+    study_time: Literal["morning", "afternoon", "evening", "night"] = "evening"
+    session_length_minutes: int = 60
+    advance_days: int = 2
+    work_style: Literal["spread_out", "batch"] = "spread_out"
+    involvement_level: Literal["proactive", "balanced", "prompt_only"] = "balanced"
+
+
+class UserPreferencesUpdate(BaseModel):
+    study_time: Optional[Literal["morning", "afternoon", "evening", "night"]] = None
+    session_length_minutes: Optional[int] = None
+    advance_days: Optional[int] = None
+    work_style: Optional[Literal["spread_out", "batch"]] = None
+    involvement_level: Optional[Literal["proactive", "balanced", "prompt_only"]] = None
+
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -493,19 +515,64 @@ def get_last_sync():
     return {"last_sync": last_sync}
 
 
+# ============== PREFERENCES ROUTES ==============
+
+@app.get("/preferences", response_model=UserPreferences)
+def get_preferences():
+    """Return current user preferences."""
+    prefs = _fetch_user_preferences()
+    return UserPreferences(**prefs)
+
+
+@app.post("/preferences", response_model=UserPreferences)
+def save_preferences(body: UserPreferencesUpdate):
+    """Create or update user preferences (upserts the single row)."""
+    logger.info("POST /preferences")
+    try:
+        existing = supabase.table("user_preferences").select("id").limit(1).execute()
+        updates = {k: v for k, v in body.model_dump().items() if v is not None}
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        if existing.data:
+            row_id = existing.data[0]["id"]
+            r = supabase.table("user_preferences").update(updates).eq("id", row_id).execute()
+        else:
+            r = supabase.table("user_preferences").insert(updates).execute()
+
+        return UserPreferences(**r.data[0])
+    except Exception as e:
+        logger.error(f"POST /preferences failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save preferences: {e}")
+
+
 # ============== AI ROUTES ==============
 
 def _fetch_active_assignments() -> list[dict]:
     """Shared helper: fetch active assignments for AI context."""
-    now_iso = datetime.now(timezone.utc).isoformat()
     response = (
         supabase.table("assignments")
-        .select("id, title, course_name, due_date, status, estimated_minutes, notes")
-        .or_(f"status.neq.submitted,due_date.gte.{now_iso}")
-        .neq("status", "unavailable")
+        .select("id, title, course_name, due_date, status, estimated_minutes, notes, description, assignment_type, point_value")
+        .not_.in_("status", ["submitted", "unavailable"])
         .execute()
     )
     return response.data or []
+
+
+def _fetch_user_preferences() -> dict:
+    """Return the single user_preferences row, or sensible defaults if not set."""
+    try:
+        r = supabase.table("user_preferences").select("*").limit(1).execute()
+        if r.data:
+            return r.data[0]
+    except Exception as e:
+        logger.warning(f"Could not fetch user preferences: {e}")
+    return {
+        "study_time": "evening",
+        "session_length_minutes": 60,
+        "advance_days": 2,
+        "work_style": "spread_out",
+        "involvement_level": "balanced",
+    }
 
 
 def _ai_error_to_http(e: Exception) -> HTTPException:
@@ -569,8 +636,9 @@ def generate_ai_suggestions():
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
+    prefs = _fetch_user_preferences()
     try:
-        raw = ai_service.generate_suggestions(assignments)
+        raw = ai_service.generate_suggestions(assignments, prefs)
     except Exception as e:
         raise _ai_error_to_http(e)
 
@@ -621,8 +689,9 @@ def generate_ai_briefing():
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
+    prefs = _fetch_user_preferences()
     try:
-        briefing = ai_service.generate_briefing(assignments)
+        briefing = ai_service.generate_briefing(assignments, prefs)
     except Exception as e:
         raise _ai_error_to_http(e)
 
@@ -644,13 +713,14 @@ async def ai_chat(req: AIChatRequest):
         raise HTTPException(status_code=400, detail="messages list cannot be empty")
 
     assignments = _fetch_active_assignments()
+    prefs = _fetch_user_preferences()
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
 
     logger.info(f"POST /ai/chat - {len(req.messages)} message(s)")
 
     def event_stream():
         try:
-            for chunk in ai_service.chat_stream(messages_dicts, assignments):
+            for chunk in ai_service.chat_stream(messages_dicts, assignments, prefs):
                 yield f"data: {json.dumps({'delta': chunk})}\n\n"
         except RuntimeError as e:
             yield f"data: {json.dumps({'error': str(e), 'code': 503})}\n\n"
@@ -710,6 +780,132 @@ def ai_apply_plan(req: AIApplyPlanRequest):
 
     logger.info(f"POST /ai/apply-plan - updated {len(updated)} assignment(s)")
     return {"updated": len(updated), "assignments": updated}
+
+
+# ============== PUSH NOTIFICATION ROUTES ==============
+
+@app.get("/push/vapid-public-key")
+def get_vapid_public_key():
+    """Return the VAPID public key for the frontend to use when subscribing."""
+    key = os.getenv("VAPID_PUBLIC_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="Push notifications not configured.")
+    return {"publicKey": key}
+
+
+@app.post("/push/subscribe")
+def push_subscribe(sub: PushSubscription):
+    """Save a browser push subscription (upsert by endpoint)."""
+    logger.info(f"POST /push/subscribe - {sub.endpoint[:60]}…")
+    try:
+        existing = supabase.table("push_subscriptions").select("id").eq("endpoint", sub.endpoint).execute()
+        row = {
+            "endpoint": sub.endpoint,
+            "p256dh": sub.keys.get("p256dh", ""),
+            "auth": sub.keys.get("auth", ""),
+        }
+        if existing.data:
+            supabase.table("push_subscriptions").update(row).eq("endpoint", sub.endpoint).execute()
+        else:
+            supabase.table("push_subscriptions").insert(row).execute()
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"POST /push/subscribe failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/push/subscribe")
+def push_unsubscribe(sub: PushSubscription):
+    """Remove a push subscription."""
+    try:
+        supabase.table("push_subscriptions").delete().eq("endpoint", sub.endpoint).execute()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/push/send-deadline-reminders")
+def send_deadline_reminders():
+    """Send push notifications for assignments due within 24 hours.
+
+    Called on demand or by an external cron. Only sends if subscriptions exist.
+    """
+    logger.info("POST /push/send-deadline-reminders")
+
+    vapid_private = os.getenv("VAPID_PRIVATE_KEY", "").replace("\\n", "\n")
+    vapid_public = os.getenv("VAPID_PUBLIC_KEY", "")
+    vapid_contact = os.getenv("VAPID_CONTACT", "mailto:admin@campusai.app")
+
+    if not vapid_private or not vapid_public:
+        raise HTTPException(status_code=503, detail="VAPID keys not configured.")
+
+    try:
+        from pywebpush import webpush, WebPushException
+    except ImportError:
+        raise HTTPException(status_code=503, detail="pywebpush not installed.")
+
+    # Fetch subscriptions
+    subs_res = supabase.table("push_subscriptions").select("*").execute()
+    subscriptions = subs_res.data or []
+    if not subscriptions:
+        return {"sent": 0, "message": "No subscribers."}
+
+    # Find assignments due in the next 24 hours
+    now = datetime.now(timezone.utc)
+    in_24h = (now + timedelta(hours=24)).isoformat()
+    due_soon = (
+        supabase.table("assignments")
+        .select("title, course_name, due_date")
+        .not_.in_("status", ["submitted", "unavailable"])
+        .lte("due_date", in_24h)
+        .gte("due_date", now.isoformat())
+        .order("due_date")
+        .execute()
+    ).data or []
+
+    if not due_soon:
+        return {"sent": 0, "message": "No assignments due soon."}
+
+    # Build notification payload
+    titles = [f"{a['title']} ({a['course_name']})" for a in due_soon[:3]]
+    body = "Due soon: " + "; ".join(titles)
+    if len(due_soon) > 3:
+        body += f" +{len(due_soon) - 3} more"
+
+    import json as _json
+    payload = _json.dumps({
+        "title": "CampusAI Reminder",
+        "body": body,
+        "icon": "/favicon.ico",
+        "badge": "/favicon.ico",
+    })
+
+    sent = 0
+    stale = []
+    for sub in subscriptions:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": sub["endpoint"],
+                    "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+                },
+                data=payload,
+                vapid_private_key=vapid_private,
+                vapid_claims={"sub": vapid_contact},
+            )
+            sent += 1
+        except WebPushException as e:
+            if e.response and e.response.status_code in (404, 410):
+                stale.append(sub["endpoint"])
+            else:
+                logger.warning(f"Push failed for {sub['endpoint'][:40]}: {e}")
+
+    # Clean up stale subscriptions
+    for endpoint in stale:
+        supabase.table("push_subscriptions").delete().eq("endpoint", endpoint).execute()
+
+    logger.info(f"POST /push/send-deadline-reminders — sent {sent}, removed {len(stale)} stale")
+    return {"sent": sent, "removed_stale": len(stale)}
 
 
 @app.on_event("startup")

@@ -1,6 +1,8 @@
 import { useState, useEffect, Component } from 'react'
 import Dashboard from './components/Dashboard'
 import LoginPage from './components/LoginPage'
+import OnboardingSurvey from './components/OnboardingSurvey'
+import { registerPushNotifications, isPushSupported, getPushPermission } from './utils/pushNotifications'
 import { API_BASE } from './config/api'
 import './App.css'
 
@@ -35,6 +37,8 @@ class ErrorBoundary extends Component {
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(null) // null = loading
   const [shouldSync, setShouldSync] = useState(false)
+  const [preferences, setPreferences] = useState(null)   // null = not yet loaded
+  const [showSurvey, setShowSurvey] = useState(false)
 
   // Check auth status on mount
   useEffect(() => {
@@ -46,20 +50,59 @@ function App() {
       const response = await fetch(`${API_BASE}/auth/status`)
       if (response.ok) {
         const data = await response.json()
-        setIsAuthenticated(data.authenticated || data.canvas_connected)
+        const authed = data.authenticated || data.canvas_connected
+        setIsAuthenticated(authed)
+        if (authed) loadPreferences()
       } else {
         setIsAuthenticated(false)
       }
     } catch (err) {
       console.error('[App] Error checking auth status:', err)
-      // If backend is not running, show login page
       setIsAuthenticated(false)
+    }
+  }
+
+  const loadPreferences = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/preferences`)
+      if (res.ok) {
+        const data = await res.json()
+        setPreferences(data)
+        if (!data.id) {
+          // First time — show the onboarding survey
+          setShowSurvey(true)
+        } else {
+          // Returning user — re-register push if they already granted permission
+          if (getPushPermission() === 'granted') maybeRegisterPush(data)
+        }
+      }
+    } catch {
+      setPreferences({}) // fall back to defaults silently
+    }
+  }
+
+  const maybeRegisterPush = (prefs) => {
+    if (!prefs) return
+    if (!isPushSupported()) return
+    if (getPushPermission() === 'denied') return
+    const level = prefs.involvement_level ?? 'balanced'
+    if (level === 'prompt_only') return
+    // Request push permission for proactive/balanced users
+    registerPushNotifications()
+  }
+
+  const handleSurveyComplete = (prefs) => {
+    setShowSurvey(false)
+    if (prefs) {
+      setPreferences(prefs)
+      maybeRegisterPush(prefs)
     }
   }
 
   const handleLoginSuccess = () => {
     setIsAuthenticated(true)
     setShouldSync(true) // Trigger sync after login
+    loadPreferences()
   }
 
   const handleSyncTriggered = () => {
@@ -98,7 +141,14 @@ function App() {
   // Show dashboard if authenticated
   return (
     <ErrorBoundary>
-      <Dashboard autoSync={shouldSync} onSyncTriggered={handleSyncTriggered} onLogout={handleLogout} />
+      {showSurvey && <OnboardingSurvey onComplete={handleSurveyComplete} />}
+      <Dashboard
+        autoSync={shouldSync}
+        onSyncTriggered={handleSyncTriggered}
+        onLogout={handleLogout}
+        preferences={preferences}
+        onPreferencesChange={setPreferences}
+      />
     </ErrorBoundary>
   )
 }

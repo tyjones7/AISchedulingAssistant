@@ -1656,8 +1656,20 @@ class LearningSuiteScraper:
                     assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/assignment/{assignment_id}"
 
             # Extract and clean description (remove HTML tags and entities)
-            description = item.get("description", "")
+            description = item.get("description", "") or item.get("instructions", "") or ""
             description = self._clean_description(description)
+
+            # Extract point value — LS uses various field names
+            point_value = None
+            for field in ("pointsPossible", "points_possible", "maxPoints", "totalPoints", "points", "total"):
+                raw = item.get(field)
+                if raw is not None:
+                    try:
+                        point_value = float(raw)
+                    except (ValueError, TypeError):
+                        pass
+                    if point_value is not None:
+                        break
 
             return {
                 "title": title,
@@ -1669,6 +1681,7 @@ class LearningSuiteScraper:
                 "assignment_type": assignment_type,
                 "button_text": button_text,
                 "ls_cid": cid,
+                "point_value": point_value,
             }
 
         except Exception as e:
@@ -3176,6 +3189,10 @@ class LearningSuiteScraper:
                         "ls_cid": assignment.get("ls_cid"),
                     }
 
+                    # Update point_value if newly available
+                    if assignment.get("point_value") is not None and existing_record.get("point_value") is None:
+                        update_data["point_value"] = assignment["point_value"]
+
                     # Only update status if Learning Suite shows a definitive change
                     # (e.g., submitted when it was previously not_started)
                     ls_status = assignment.get("status")
@@ -3228,6 +3245,7 @@ class LearningSuiteScraper:
                         "learning_suite_url": assignment.get("link"),
                         "assignment_type": assignment.get("assignment_type"),
                         "ls_cid": assignment.get("ls_cid"),
+                        "point_value": assignment.get("point_value"),
                     }
 
                     logger.debug(f"    [DB] INSERTING NEW RECORD:")

@@ -62,7 +62,43 @@ def _get_groq_client():
             raise RuntimeError(f"Failed to initialize Groq client: {e}")
 
 
-# ── Shared context builder ─────────────────────────────────────────────────────
+# ── Shared context builders ────────────────────────────────────────────────────
+
+def _build_profile_context(prefs: Optional[dict]) -> str:
+    """Format user preferences into a natural-language profile for prompts."""
+    if not prefs:
+        return ""
+
+    study_time_labels = {
+        "morning": "mornings (before noon)",
+        "afternoon": "afternoons (noon–5 pm)",
+        "evening": "evenings (5–9 pm)",
+        "night": "late at night (9 pm+)",
+    }
+    work_style_labels = {
+        "spread_out": "spread work across multiple shorter sessions",
+        "batch": "knock out work in one long sitting",
+    }
+    involvement_labels = {
+        "proactive": "proactive — always suggest plans and check in automatically",
+        "balanced": "balanced — suggest plans when deadlines are approaching",
+        "prompt_only": "prompt-only — only give advice when directly asked",
+    }
+
+    lines = ["\nStudent profile:"]
+    study_time = prefs.get("study_time", "evening")
+    lines.append(f"  - Best study time: {study_time_labels.get(study_time, study_time)}")
+    session_len = prefs.get("session_length_minutes", 60)
+    lines.append(f"  - Preferred session length: {session_len} minutes")
+    advance = prefs.get("advance_days", 2)
+    lines.append(f"  - Likes to start assignments {advance} day(s) before the deadline")
+    work_style = prefs.get("work_style", "spread_out")
+    lines.append(f"  - Work style: {work_style_labels.get(work_style, work_style)}")
+    involvement = prefs.get("involvement_level", "balanced")
+    lines.append(f"  - AI involvement preference: {involvement_labels.get(involvement, involvement)}")
+    lines.append("Use this profile to tailor all scheduling advice and time block suggestions.")
+    return "\n".join(lines)
+
 
 def _relative_due(due_iso: Optional[str]) -> str:
     """Convert an ISO due_date string to a human-readable relative label."""
@@ -96,9 +132,17 @@ def _build_assignment_context(assignments: list[dict]) -> str:
         est_str = f", est. {est} min" if est else ""
         notes = (a.get("notes") or "").strip()
         notes_str = f', notes: "{notes[:80]}"' if notes else ""
+        atype = a.get("assignment_type") or ""
+        type_str = f" [{atype}]" if atype and atype != "assignment" else ""
+        pts = a.get("point_value")
+        pts_str = f", {pts:g} pts" if pts is not None else ""
+        desc = (a.get("description") or "").strip()
+        desc_str = f'\n      Description: "{desc[:200]}"' if desc else ""
+        no_context = not desc and not est
+        unknown_str = " [no description — ask student about this]" if no_context else ""
         aid = a.get("id", "")
         lines.append(
-            f'  - ID:{aid} | "{title}" ({course}) | {status} | {due_label}{est_str}{notes_str}'
+            f'  - ID:{aid} | "{title}"{type_str} ({course}) | {status} | {due_label}{pts_str}{est_str}{notes_str}{unknown_str}{desc_str}'
         )
     return "\n".join(lines)
 
@@ -154,6 +198,13 @@ Your role:
 - Be encouraging but honest about deadlines
 - Keep responses concise (2–5 sentences for simple questions)
 
+Clarifying questions:
+- For any assignment marked [no description — ask student about this], ask one brief question
+  to understand it better before scheduling it. For example: "What does the '{title}' assignment
+  involve — is it a paper, problem set, or something else? And roughly how long do you expect it
+  to take?" Only ask about one unknown assignment per message to avoid overwhelming the student.
+- Use what you learn to give better time estimates and scheduling advice.
+
 When you build a study plan or weekly schedule, lay it out day by day.
 At the end of any response that includes a specific study schedule or plan,
 append a machine-readable block in EXACTLY this format (no spaces around tags):
@@ -181,7 +232,7 @@ Respond ONLY with valid JSON. No markdown, no explanation."""
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def generate_suggestions(assignments: list[dict]) -> list[dict]:
+def generate_suggestions(assignments: list[dict], prefs: Optional[dict] = None) -> list[dict]:
     """Generate AI priority suggestions for a batch of active assignments.
 
     Uses llama-3.1-8b-instant (fast) for cost efficiency.
@@ -199,8 +250,10 @@ def generate_suggestions(assignments: list[dict]) -> list[dict]:
         return []
 
     client = _get_groq_client()
-    user_msg = _build_assignment_context(assignments) + (
-        "\n\nScore every assignment listed above and return the JSON."
+    user_msg = (
+        _build_assignment_context(assignments)
+        + _build_profile_context(prefs)
+        + "\n\nScore every assignment listed above and return the JSON."
     )
 
     logger.info(f"[ai_service] generate_suggestions: {len(assignments)} assignment(s)")
@@ -237,7 +290,7 @@ def generate_suggestions(assignments: list[dict]) -> list[dict]:
         raise
 
 
-def generate_briefing(assignments: list[dict]) -> str:
+def generate_briefing(assignments: list[dict], prefs: Optional[dict] = None) -> str:
     """Generate a short natural-language daily briefing.
 
     Uses llama-3.3-70b-versatile for higher quality prose.
@@ -249,7 +302,7 @@ def generate_briefing(assignments: list[dict]) -> str:
         RuntimeError, Exception — same as generate_suggestions
     """
     client = _get_groq_client()
-    context = _build_assignment_context(assignments)
+    context = _build_assignment_context(assignments) + _build_profile_context(prefs)
 
     logger.info(f"[ai_service] generate_briefing: {len(assignments)} assignment(s)")
 
@@ -267,7 +320,7 @@ def generate_briefing(assignments: list[dict]) -> str:
     return briefing
 
 
-def chat_stream(messages: list[dict], assignments: list[dict]):
+def chat_stream(messages: list[dict], assignments: list[dict], prefs: Optional[dict] = None):
     """Yield delta strings from a streaming Groq chat completion.
 
     Uses llama-3.3-70b-versatile with stream=True.
@@ -284,7 +337,7 @@ def chat_stream(messages: list[dict], assignments: list[dict]):
         RuntimeError, Exception — same as generate_suggestions
     """
     client = _get_groq_client()
-    context = _build_assignment_context(assignments)
+    context = _build_assignment_context(assignments) + _build_profile_context(prefs)
     system_prompt = _CHAT_SYSTEM_TEMPLATE.format(context=context)
 
     groq_messages = [{"role": "system", "content": system_prompt}] + messages
