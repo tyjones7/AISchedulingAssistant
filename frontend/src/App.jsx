@@ -99,10 +99,22 @@ function App() {
     }
   }
 
-  const handleLoginSuccess = () => {
+  const handleLoginSuccess = async () => {
     setIsAuthenticated(true)
-    setShouldSync(true) // Trigger sync after login
     loadPreferences()
+    // Only auto-sync if we haven't synced in the past 12 hours
+    try {
+      const res = await fetch(`${API_BASE}/sync/last`)
+      if (res.ok) {
+        const data = await res.json()
+        const lastSyncAt = data.last_sync?.last_sync_at
+        if (lastSyncAt) {
+          const diffHours = (Date.now() - new Date(lastSyncAt).getTime()) / 3600000
+          if (diffHours < 12) return // Recent sync — skip auto-sync
+        }
+      }
+    } catch { /* ignore — proceed with sync if check fails */ }
+    setShouldSync(true)
   }
 
   const handleSyncTriggered = () => {

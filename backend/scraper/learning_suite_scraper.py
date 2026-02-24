@@ -1597,8 +1597,8 @@ class LearningSuiteScraper:
             if button_text in ("graded", "completed"):
                 status = "submitted"
             elif button_text == "view":
-                # 'view' is ambiguous — only mark submitted with corroborating evidence
-                if has_score or is_graded:
+                # 'view' is ambiguous — mark submitted with any corroborating evidence
+                if has_score or is_graded or is_submitted or submission_date:
                     status = "submitted"
             elif button_text in ("continue", "resume"):
                 status = "in_progress"
@@ -1609,8 +1609,8 @@ class LearningSuiteScraper:
                     opens_date = self._extract_opens_date(str(item.get("buttonText", "") or item.get("button", "")))
                     if opens_date:
                         due_date = opens_date
-            elif has_score or is_graded:
-                # Only definitive indicators of completion
+            elif has_score or is_graded or is_submitted or submission_date:
+                # Definitive indicators of completion
                 status = "submitted"
 
             logger.debug(f"    [JS STATUS] title='{title[:30]}' score={score} feedback={has_feedback} graded={is_graded} submitted={is_submitted} button='{button_text}' -> {status}")
