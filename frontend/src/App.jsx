@@ -102,15 +102,16 @@ function App() {
   const handleLoginSuccess = async () => {
     setIsAuthenticated(true)
     loadPreferences()
-    // Only auto-sync if we haven't synced in the past 12 hours
+    // Only auto-sync if there hasn't been a successful sync in the past 12 hours
     try {
       const res = await fetch(`${API_BASE}/sync/last`)
       if (res.ok) {
         const data = await res.json()
-        const lastSyncAt = data.last_sync?.last_sync_at
-        if (lastSyncAt) {
-          const diffHours = (Date.now() - new Date(lastSyncAt).getTime()) / 3600000
-          if (diffHours < 12) return // Recent sync — skip auto-sync
+        const lastSync = data.last_sync
+        // Only skip if last sync was successful AND recent
+        if (lastSync?.last_sync_status === 'completed' && lastSync?.last_sync_at) {
+          const diffHours = (Date.now() - new Date(lastSync.last_sync_at).getTime()) / 3600000
+          if (diffHours < 12) return // Recent successful sync — skip auto-sync
         }
       }
     } catch { /* ignore — proceed with sync if check fails */ }

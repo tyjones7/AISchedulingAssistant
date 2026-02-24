@@ -163,31 +163,32 @@ class LearningSuiteScraper:
         return self.LEARNING_SUITE_URL
 
     def _sanitize_url(self, url: str, cid: str = None) -> str:
-        """Sanitize a Learning Suite URL to remove session segments.
+        """Sanitize a Learning Suite URL to remove session segments and normalise path.
 
         Session segments like /.9dem or /.iMnE expire and cause error pages.
-        This converts URLs to use the static base URL with the course CID.
+        Converts URLs to the stable cid-based format:
+          https://learningsuite.byu.edu/cid-{cid}/student/assignment/{id}
 
         Args:
             url: The URL to sanitize
             cid: Optional course ID to include in the URL
 
         Returns:
-            Sanitized URL without session segment
+            Sanitized, stable URL without session segment
         """
         if not url:
             return url
 
-        # Remove session segment (pattern: /.[A-Za-z0-9]+)
-        # Convert: https://learningsuite.byu.edu/.9dem/assignment/XXX
-        # To:      https://learningsuite.byu.edu/cid-YYY/assignment/XXX (if cid provided)
-        # Or:      https://learningsuite.byu.edu/assignment/XXX (if no cid)
-
-        # Extract the path after the session segment
+        # Extract the path after a session segment (e.g. /.9dem)
         match = re.search(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+(/.*)', url)
         if match:
             path = match.group(1)
-            # If we have a cid and the path doesn't already have one, add it
+
+            # Normalise: if path is /assignment/... or /exam/..., prepend /student
+            if re.match(r'^/(assignment|exam)/', path):
+                path = '/student' + path
+
+            # Add cid if we have one and it's not already in the path
             if cid and 'cid-' not in path:
                 return f"{self.LEARNING_SUITE_URL}/cid-{cid}{path}"
             return f"{self.LEARNING_SUITE_URL}{path}"
@@ -1011,44 +1012,63 @@ class LearningSuiteScraper:
                     pass
             logger.debug("")
 
-            # FIX: Only use links whose TEXT directly contains a course name
-            # This avoids the DOM traversal bug where wrong course names get matched
+            # Pass 1: find courses where the link's own text contains the course name
+            cid_to_url: dict[str, str] = {}
             for link in all_links:
                 try:
                     href = link.get_attribute("href")
                     link_text = link.text.strip() if link.text else ""
-
-                    if not href or not link_text:
+                    if not href:
                         continue
-
-                    # Extract CID from href
                     cid_match = re.search(r'cid-([A-Za-z0-9_-]+)', href)
                     if not cid_match:
                         continue
-
                     cid = cid_match.group(1)
+                    cid_to_url.setdefault(cid, href)   # record first URL seen for this cid
                     if cid in seen_cids:
                         continue
-
-                    # Check if link text IS a course name (not "Go" or empty)
                     name_match = re.search(course_pattern, link_text)
                     if name_match:
                         course_name = name_match.group(1).strip()
-                        # Clean up trailing button words
                         course_name = re.sub(r'\s+(Go|View|Open)\s*$', '', course_name)
-
                         if re.match(r'^[A-Z]{1,5}(?:\s+[A-Z])?\s+\d{3}', course_name):
                             seen_cids.add(cid)
-                            courses.append({
-                                "name": course_name,
-                                "cid": cid,
-                                "url": href
-                            })
-                            logger.debug(f"    [MATCHED] '{course_name}' -> cid-{cid}")
-
+                            courses.append({"name": course_name, "cid": cid, "url": href})
+                            logger.debug(f"    [MATCHED via link text] '{course_name}' -> cid-{cid}")
                 except Exception as e:
                     logger.debug(f"Error processing link: {e}")
-                    continue
+
+            # Pass 2: for CIDs still not matched, walk up DOM to find course name in ancestors
+            for link in all_links:
+                try:
+                    href = link.get_attribute("href")
+                    if not href:
+                        continue
+                    cid_match = re.search(r'cid-([A-Za-z0-9_-]+)', href)
+                    if not cid_match:
+                        continue
+                    cid = cid_match.group(1)
+                    if cid in seen_cids:
+                        continue
+                    # Walk up to 4 ancestor levels looking for course-name text
+                    el = link
+                    for _ in range(4):
+                        try:
+                            el = el.find_element(By.XPATH, "..")
+                            ancestor_text = el.text.strip()
+                            name_match = re.search(course_pattern, ancestor_text)
+                            if name_match:
+                                course_name = name_match.group(1).strip()
+                                course_name = re.sub(r'\s+(Go|View|Open)\s*$', '', course_name)
+                                if re.match(r'^[A-Z]{1,5}(?:\s+[A-Z])?\s+\d{3}', course_name):
+                                    seen_cids.add(cid)
+                                    courses.append({"name": course_name, "cid": cid, "url": cid_to_url.get(cid, href)})
+                                    logger.debug(f"    [MATCHED via ancestor] '{course_name}' -> cid-{cid}")
+                                    break
+                        except Exception:
+                            break
+                except Exception as e:
+                    logger.debug(f"Error in pass-2 processing: {e}")
 
             logger.info("=" * 60)
             logger.info(f"TOTAL COURSES FOUND: {len(courses)}")
