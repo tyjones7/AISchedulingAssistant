@@ -32,6 +32,7 @@ const TIME_ESTIMATES = [
 
 function AssignmentDetail({ assignment, onClose, onUpdate }) {
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(null)
 
   // Form state
   const [status, setStatus] = useState(assignment?.status || 'not_started')
@@ -75,6 +76,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
   const isPastDue = assignment.due_date && new Date(assignment.due_date) < new Date() && assignment.status !== 'submitted'
 
   const handleSave = async () => {
+    setSaveError(null)
     setSaving(true)
 
     try {
@@ -102,6 +104,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
       onClose()
     } catch (err) {
       console.error('Failed to save assignment:', err)
+      setSaveError('Failed to save. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -333,6 +336,9 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
 
         {/* Footer */}
         <div className="modal-footer">
+          {saveError && (
+            <span className="modal-save-error">{saveError}</span>
+          )}
           <button className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>

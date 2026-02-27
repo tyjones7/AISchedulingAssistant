@@ -9,6 +9,7 @@ This module handles:
 - Change detection and database updates
 """
 
+import json
 import os
 import re
 import time
@@ -74,7 +75,7 @@ class LearningSuiteScraper:
         'resubmit': 'submitted',  # Can resubmit means already submitted once
 
         # Closed/unavailable
-        'closed': 'not_started',  # Missed it but still mark as not started
+        'closed': 'unavailable',  # Missed deadline — treat same as unavailable
         'unavailable': 'unavailable',
     }
 
@@ -179,7 +180,7 @@ class LearningSuiteScraper:
         if not url:
             return url
 
-        # Extract the path after a session segment (e.g. /.9dem)
+        # Case 1: URL has a session segment (e.g. /.9dem) — strip it and normalise
         match = re.search(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+(/.*)', url)
         if match:
             path = match.group(1)
@@ -189,6 +190,17 @@ class LearningSuiteScraper:
                 path = '/student' + path
 
             # Add cid if we have one and it's not already in the path
+            if cid and 'cid-' not in path:
+                return f"{self.LEARNING_SUITE_URL}/cid-{cid}{path}"
+            return f"{self.LEARNING_SUITE_URL}{path}"
+
+        # Case 2: URL has clean base but missing /student/ prefix and/or cid-
+        # e.g. https://learningsuite.byu.edu/assignment/BnXO
+        clean_match = re.match(
+            r'https://learningsuite\.byu\.edu(/(assignment|exam)/.+)', url
+        )
+        if clean_match:
+            path = '/student' + clean_match.group(1)
             if cid and 'cid-' not in path:
                 return f"{self.LEARNING_SUITE_URL}/cid-{cid}{path}"
             return f"{self.LEARNING_SUITE_URL}{path}"
@@ -278,83 +290,71 @@ class LearningSuiteScraper:
             self._session_storage = session_storage or {}
             self._last_keepalive = time.time()
 
-            # Navigate to the domain first (required to set cookies)
-            self.driver.get(self.LEARNING_SUITE_URL)
-            self._wait_for_page_ready(3)
+            # Use CDP Network.setCookie to inject cookies without needing to be
+            # on the matching domain first. Selenium's add_cookie() requires the
+            # browser to be on the cookie's domain — but navigating to LS without
+            # cookies redirects us to CAS, so domain-specific LS cookies fail silently.
+            # CDP bypasses this restriction entirely.
+            self.driver.get("about:blank")
 
-            # Inject each cookie - keep all fields except truly problematic ones
-            # Fields like 'expiry', 'sameSite' are important for session validity
             injected_count = 0
             for cookie in cookies:
-                # Only remove fields that Selenium cannot handle
-                # Keep: name, value, domain, path, secure, httpOnly, expiry, sameSite
-                fields_to_remove = {'sessionId', 'storeId'}
-                clean_cookie = {k: v for k, v in cookie.items()
-                                if k not in fields_to_remove}
-
-                # Fix sameSite value if present - Selenium requires specific casing
-                if 'sameSite' in clean_cookie:
-                    same_site = str(clean_cookie['sameSite']).capitalize()
-                    if same_site not in ('Strict', 'Lax', 'None'):
-                        del clean_cookie['sameSite']
-                    else:
-                        clean_cookie['sameSite'] = same_site
+                cdp_cookie = {
+                    "name": cookie["name"],
+                    "value": cookie["value"],
+                    "domain": cookie.get("domain", "learningsuite.byu.edu"),
+                    "path": cookie.get("path", "/"),
+                    "secure": bool(cookie.get("secure", False)),
+                    "httpOnly": bool(cookie.get("httpOnly", False)),
+                }
+                # CDP uses 'expires' (Unix timestamp); Selenium uses 'expiry'
+                if "expiry" in cookie:
+                    cdp_cookie["expires"] = int(cookie["expiry"])
+                # sameSite: CDP accepts "Strict", "Lax", "None"
+                if "sameSite" in cookie:
+                    same_site = str(cookie["sameSite"]).capitalize()
+                    if same_site in ("Strict", "Lax", "None"):
+                        cdp_cookie["sameSite"] = same_site
 
                 try:
-                    self.driver.add_cookie(clean_cookie)
+                    self.driver.execute_cdp_cmd("Network.setCookie", cdp_cookie)
                     injected_count += 1
                 except Exception as e:
-                    # If adding with extra fields fails, try minimal cookie
-                    minimal_cookie = {k: v for k, v in cookie.items()
-                                      if k in ('name', 'value', 'domain', 'path', 'secure', 'httpOnly')}
-                    try:
-                        self.driver.add_cookie(minimal_cookie)
-                        injected_count += 1
-                    except Exception as e2:
-                        logger.debug(f"Skipped cookie {cookie.get('name')}: {e2}")
+                    logger.debug(f"CDP cookie set failed for {cookie.get('name')}: {e}")
 
-            logger.info(f"Injected {injected_count}/{len(cookies)} cookies")
+            logger.info(f"Injected {injected_count}/{len(cookies)} cookies via CDP")
 
-            # Set the dynamic base URL
-            self.dynamic_base_url = base_url
+            # Navigate to LS with injected cookies; valid cookies will land us
+            # on the authenticated dashboard instead of redirecting to CAS.
+            self.driver.get(self.LEARNING_SUITE_URL)
+            self._wait_for_page_ready()
 
-            # Inject localStorage and sessionStorage data
+            current_url = self.driver.current_url
+            # If we're redirected to CAS login, the cookies are invalid
+            if 'cas.byu.edu' in current_url:
+                logger.warning("Cookie injection failed -- redirected to CAS login")
+                return False
+
+            if any(x in current_url.lower() for x in ['duo', 'authenticate', 'saml', 'idp']):
+                logger.warning(f"Cookie injection failed -- redirected to auth page: {current_url}")
+                return False
+
+            # Extract the new dynamic base URL from wherever LS landed us
+            new_base = self._extract_dynamic_base_url()
+            if new_base:
+                self.dynamic_base_url = new_base
+                logger.info(f"Cookie injection successful, new dynamic base: {new_base}")
+            else:
+                # LS didn't redirect to a dynamic URL — not fully authenticated
+                logger.warning(f"Cookie injection: no dynamic URL found, at: {current_url}")
+                self.dynamic_base_url = base_url  # fall back
+
+            # Inject web storage now that we're on the LS origin
             if self._local_storage:
                 self._inject_web_storage(self._local_storage, 'localStorage')
             if self._session_storage:
                 self._inject_web_storage(self._session_storage, 'sessionStorage')
 
-            # Verify the session works by navigating to the base URL
-            self.driver.get(base_url)
-            self._wait_for_page_ready()
-
-            current_url = self.driver.current_url
-            # If we're redirected to CAS login, the session is invalid
-            if 'cas.byu.edu' in current_url:
-                logger.warning("Cookie injection failed -- redirected to CAS login")
-                return False
-
-            # Also check for Duo or other auth redirects
-            if any(x in current_url.lower() for x in ['duo', 'authenticate', 'saml', 'idp']):
-                logger.warning(f"Cookie injection failed -- redirected to auth page: {current_url}")
-                return False
-
-            # Deep verification: try navigating to student top page
-            student_url = f"{base_url}/student/top"
-            self.driver.get(student_url)
-            self._wait_for_page_ready()
-
-            current_url = self.driver.current_url
-            if 'cas.byu.edu' in current_url or 'duo' in current_url.lower():
-                logger.warning("Deep session verification failed -- redirected to login")
-                return False
-
-            # Check page content for session expiry messages
-            if not self._check_session_valid():
-                logger.warning("Session appears invalid after deep verification")
-                return False
-
-            logger.info(f"Cookie injection successful, verified at: {current_url}")
             return True
 
         except Exception as e:
@@ -373,11 +373,10 @@ class LearningSuiteScraper:
 
         try:
             for key, value in storage_data.items():
-                # Escape the value for JavaScript
-                escaped_value = str(value).replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
-                escaped_key = str(key).replace("\\", "\\\\").replace("'", "\\'")
+                # Use json.dumps for safe JS string literals — handles \, ', ", \n,
+                # Unicode, and every other special character correctly.
                 self.driver.execute_script(
-                    f"{storage_type}.setItem('{escaped_key}', '{escaped_value}');"
+                    f"{storage_type}.setItem({json.dumps(str(key))}, {json.dumps(str(value))});"
                 )
             logger.info(f"Injected {len(storage_data)} {storage_type} items")
         except Exception as e:
@@ -1305,11 +1304,12 @@ class LearningSuiteScraper:
         logger.debug(f">>> CID: {cid}")
         logger.debug("=" * 70)
 
-        # Navigate to course first, then to Grades → Assignments
+        # Navigate to course first, then to Grades → Assignments.
+        # If course home errors (some courses have a blank/restricted home page),
+        # don't bail — fall through so we can try the gradebook URL directly below.
         course_url = f"{base_url}/cid-{cid}"
         if not self._safe_navigate(course_url, f"course home - {course_name}"):
-            logger.debug(f"WARNING: Could not access course home for {course_name}")
-            return assignments
+            logger.debug(f"WARNING: Could not access course home for {course_name}, will try gradebook URL directly")
 
         # Try to click on Grades link in the sidebar/navigation
         grades_clicked = False
@@ -1601,14 +1601,22 @@ class LearningSuiteScraper:
             # Determine status based on available fields
             status = "not_started"
 
-            # Check for score/feedback (indicates submitted/graded)
-            # Score can be 0 (valid grade) or a number, so check explicitly
+            # Check for score (indicates submitted/graded)
+            # Exclude score=0: LS pre-populates 0 for participation/auto-tracked items
+            # even when the student hasn't submitted. Only a non-zero score is reliable.
             score = item.get("score")
-            has_score = score is not None and score != ""
+            has_score = False
+            if score is not None and score != "":
+                try:
+                    has_score = float(score) != 0
+                except (TypeError, ValueError):
+                    has_score = bool(score)
 
-            # Check various indicators that the assignment is submitted/graded
-            has_feedback = bool(item.get("feedback"))
-            is_graded = item.get("graded", False)
+            # Reliable submission indicators:
+            # - submission_date: actual timestamp of student submission (strongest signal)
+            # - has_score: non-zero grade has been assigned
+            # - is_graded / is_submitted: NOT reliable standalone — LS sets these for
+            #   participation grades and auto-tracked items before the student does anything
             is_submitted = item.get("submitted", False)
             submission_date = item.get("submissionDate") or item.get("submission_date")
 
@@ -1617,8 +1625,9 @@ class LearningSuiteScraper:
             if button_text in ("graded", "completed"):
                 status = "submitted"
             elif button_text == "view":
-                # 'view' is ambiguous — mark submitted with any corroborating evidence
-                if has_score or is_graded or is_submitted or submission_date:
+                # 'view' is ambiguous — only call it submitted with a reliable signal.
+                # Excluded: is_submitted (unreliable), score=0 (pre-populated), is_graded alone.
+                if has_score or submission_date:
                     status = "submitted"
             elif button_text in ("continue", "resume"):
                 status = "in_progress"
@@ -1629,11 +1638,11 @@ class LearningSuiteScraper:
                     opens_date = self._extract_opens_date(str(item.get("buttonText", "") or item.get("button", "")))
                     if opens_date:
                         due_date = opens_date
-            elif has_score or is_graded or is_submitted or submission_date:
-                # Definitive indicators of completion
+            elif has_score or submission_date:
+                # Non-zero score or actual submission timestamp → definitively submitted
                 status = "submitted"
 
-            logger.debug(f"    [JS STATUS] title='{title[:30]}' score={score} feedback={has_feedback} graded={is_graded} submitted={is_submitted} button='{button_text}' -> {status}")
+            logger.debug(f"    [JS STATUS] title='{title[:30]}' score={score} has_score={has_score} submitted={is_submitted} sub_date={bool(submission_date)} button='{button_text}' -> {status}")
 
             # Infer assignment type from the 'type' field or title FIRST (needed for URL construction)
             ls_type = item.get("type", "").lower()
@@ -1781,7 +1790,8 @@ class LearningSuiteScraper:
             "%b. %d",                # "Jan. 29"
         ]
 
-        current_year = datetime.now().year
+        now = datetime.now()
+        current_year = now.year
 
         for fmt in formats:
             try:
@@ -1789,6 +1799,11 @@ class LearningSuiteScraper:
                 # Add year if not present (defaults to 1900)
                 if dt.year == 1900:
                     dt = dt.replace(year=current_year)
+                    # Near year boundary: if this month is already in the past by
+                    # more than 6 months, the date likely belongs to next year.
+                    # e.g. it's Jan 5 and we see "Dec 15" → should be Dec 15 next year.
+                    if (now - dt).days > 180:
+                        dt = dt.replace(year=current_year + 1)
                 # If no time specified, set to 11:59 PM
                 if dt.hour == 0 and dt.minute == 0 and "%I" not in fmt and "%H" not in fmt:
                     dt = dt.replace(hour=23, minute=59)
@@ -3192,17 +3207,19 @@ class LearningSuiteScraper:
                 if existing.data:
                     # Update existing assignment
                     existing_record = existing.data[0]
-                    is_modified = False
+                    # scraped_data_changed tracks whether LS returned new content —
+                    # kept separate from the DB's is_modified column (user-edit flag)
+                    # so the scraper never resets a user's manual edits.
+                    scraped_data_changed = False
 
                     # Check for changes in key fields
                     if existing_record.get("due_date") != assignment.get("due_date"):
-                        is_modified = True
+                        scraped_data_changed = True
                     if existing_record.get("description") != assignment.get("description"):
-                        is_modified = True
+                        scraped_data_changed = True
 
                     update_data = {
                         "last_scraped_at": now,
-                        "is_modified": is_modified,
                         "link": assignment.get("link"),
                         "learning_suite_url": assignment.get("link"),
                         "assignment_type": assignment.get("assignment_type"),
@@ -3220,19 +3237,31 @@ class LearningSuiteScraper:
 
                     # Update status only for these transitions:
                     # - anything -> submitted (user completed it)
+                    # - submitted -> not_started if LS no longer shows it as submitted
+                    #   AND the user hasn't manually edited it (is_modified=False)
                     # - unavailable -> not_started (became available)
                     # - newly_assigned stays unless LS shows definitive state
+                    is_user_modified = existing_record.get("is_modified", False)
                     if ls_status == "submitted" and current_status != "submitted":
                         update_data["status"] = "submitted"
+                    elif (
+                        ls_status in ("not_started", "newly_assigned")
+                        and current_status == "submitted"
+                        and not is_user_modified
+                    ):
+                        # LS no longer considers this submitted (scraper detection changed
+                        # or student's submission was retracted). Roll back to not_started
+                        # only if the user hasn't manually set the status.
+                        update_data["status"] = "not_started"
                     elif ls_status == "not_started" and current_status == "unavailable":
                         update_data["status"] = "not_started"
                     elif ls_status == "in_progress" and current_status in ("not_started", "newly_assigned"):
                         update_data["status"] = "in_progress"
-                    elif ls_status == "unavailable" and current_status == "newly_assigned":
+                    elif ls_status == "unavailable" and current_status in ("newly_assigned", "not_started"):
                         update_data["status"] = "unavailable"
 
-                    # Update due date if changed
-                    if is_modified and assignment.get("due_date"):
+                    # Update due date and description if scraped data changed
+                    if scraped_data_changed and assignment.get("due_date"):
                         update_data["due_date"] = assignment["due_date"]
                         update_data["description"] = assignment.get("description")
 
@@ -3240,7 +3269,7 @@ class LearningSuiteScraper:
                         "id", existing_record["id"]
                     ).execute()
 
-                    if is_modified:
+                    if scraped_data_changed:
                         summary["modified"] += 1
                         logger.debug(f"    [DB] UPDATED (modified)")
                     else:

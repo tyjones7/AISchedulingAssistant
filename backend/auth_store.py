@@ -6,9 +6,12 @@ We store the authenticated session state, not passwords.
 """
 
 import json
+import logging
 import os
 import threading
 import uuid
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 from typing import Optional
 from enum import Enum
@@ -66,8 +69,9 @@ def _save_session():
     try:
         with open(_SESSION_FILE, "w") as f:
             json.dump(data, f)
-    except Exception:
-        pass
+        os.chmod(_SESSION_FILE, 0o600)  # owner read/write only
+    except Exception as e:
+        logger.warning(f"Failed to save session to disk: {e}")
 
 
 def _load_session():
@@ -87,8 +91,8 @@ def _load_session():
             _local_storage = data.get("local_storage", {})
             _session_storage = data.get("session_storage", {})
             _is_authenticated = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to load session from disk: {e}")
 
 
 _load_session()

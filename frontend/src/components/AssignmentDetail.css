@@ -406,6 +406,12 @@
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
 
+.modal-save-error {
+  margin-right: auto;
+  font-size: var(--text-sm);
+  color: #ef4444;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .modal-backdrop {
