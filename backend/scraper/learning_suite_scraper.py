@@ -984,6 +984,13 @@ class LearningSuiteScraper:
         logger.debug("=" * 80)
 
         try:
+            # Always navigate to /student/top before extracting courses.
+            # After cookie injection, LS may redirect to a course-specific page
+            # (e.g., /cid-xyz/student/home) which only shows that course's links.
+            # /student/top is the home page that lists all enrolled courses.
+            home_url = f"{self._get_base_url()}/student/top"
+            logger.info(f"Navigating to home page for course list: {home_url}")
+            self.driver.get(home_url)
             self._wait_for_page_ready()
             logger.debug(f"Current URL: {self.driver.current_url}")
 
