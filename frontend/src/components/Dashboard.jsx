@@ -5,8 +5,9 @@ import SyncButton from './SyncButton'
 import AIBriefing from './AIBriefing'
 import AIChat from './AIChat'
 import ProactivePlan from './ProactivePlan'
+import Settings from './Settings'
 import { ToastContainer } from './Toast'
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 import './Dashboard.css'
 
 const STATUS_LABELS = {
@@ -61,11 +62,20 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   // Detail modal
   const [selectedAssignment, setSelectedAssignment] = useState(null)
 
+  // Settings panel
+  const [showSettings, setShowSettings] = useState(false)
+
   // Trigger sync from SyncButton
   const [triggerSync, setTriggerSync] = useState(false)
 
   // Later section collapsed by default
   const [laterCollapsed, setLaterCollapsed] = useState(true)
+
+  // Hide submitted toggle — persisted in localStorage
+  const [hideSubmitted, setHideSubmitted] = useState(() => {
+    const stored = localStorage.getItem('campus-ai-hide-submitted')
+    return stored === null ? true : stored === 'true'
+  })
 
   // AI features
   const [suggestions, setSuggestions] = useState({})
@@ -77,9 +87,8 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
 
   const handleInvolvementChange = async (level) => {
     try {
-      const res = await fetch(`${API_BASE}/preferences`, {
+      const res = await authFetch(`${API_BASE}/preferences`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ involvement_level: level }),
       })
       if (res.ok) {
@@ -116,23 +125,31 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     }
   }, [autoSync, onSyncTriggered])
 
-  // Poll for new assignments while sync is in progress
+  // Poll for new assignments while sync is in progress (2s for real-time feel)
   useEffect(() => {
     if (!isSyncing) return
     const interval = setInterval(() => {
       fetchAssignments()
-    }, 5000)
+    }, 2000)
     return () => clearInterval(interval)
   }, [isSyncing])
+
+  // Persist hideSubmitted preference
+  useEffect(() => {
+    localStorage.setItem('campus-ai-hide-submitted', String(hideSubmitted))
+  }, [hideSubmitted])
 
   const handleSyncStarted = useCallback(() => {
     setTriggerSync(false)
     setIsSyncing(true)
+    // Set an initial status immediately so the progress banner appears right away
+    // (before the first poll arrives ~3s later)
+    setSyncStatus({ status: 'pending', message: 'Starting sync...', total_courses: 0, current_course: 0 })
   }, [])
 
   const fetchAssignments = async () => {
     try {
-      const response = await fetch(`${API_BASE}/assignments?exclude_past_submitted=true`)
+      const response = await authFetch(`${API_BASE}/assignments?exclude_past_submitted=true`)
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
@@ -149,7 +166,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
 
   const fetchLastSync = async () => {
     try {
-      const response = await fetch(`${API_BASE}/sync/last`)
+      const response = await authFetch(`${API_BASE}/sync/last`)
       if (!response.ok) return
       const data = await response.json()
       if (data.last_sync?.last_sync_at) {
@@ -162,7 +179,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
 
   const fetchSuggestions = async () => {
     try {
-      const response = await fetch(`${API_BASE}/ai/suggestions`)
+      const response = await authFetch(`${API_BASE}/ai/suggestions`)
       if (!response.ok) return
       const data = await response.json()
       const map = {}
@@ -180,8 +197,8 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     setIsGeneratingAI(true)
     try {
       const [suggestionsRes, briefingRes] = await Promise.all([
-        fetch(`${API_BASE}/ai/suggestions/generate`, { method: 'POST' }),
-        fetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' }),
+        authFetch(`${API_BASE}/ai/suggestions/generate`, { method: 'POST' }),
+        authFetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' }),
       ])
 
       if (suggestionsRes.ok) {
@@ -242,11 +259,10 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     setUpdatingIds((prev) => new Set([...prev, assignmentId]))
 
     try {
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE}/assignments/${assignmentId}`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: newStatus }),
         }
       )
@@ -295,17 +311,23 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     addToast('Assignment updated', 'success')
   }, [addToast])
 
-  // Active assignments: filter out submitted past-due
+  // Count of submitted assignments (for the toggle badge)
+  const submittedCount = useMemo(() => {
+    return assignments.filter((a) => a.status === 'submitted').length
+  }, [assignments])
+
+  // Active assignments: filter out submitted past-due, and optionally all submitted
   const activeAssignments = useMemo(() => {
     const now = new Date()
     return assignments.filter((a) => {
+      if (hideSubmitted && a.status === 'submitted') return false
       if (a.status === 'submitted' && a.due_date) {
         const dueDate = new Date(a.due_date)
         if (dueDate < now) return false
       }
       return true
     })
-  }, [assignments])
+  }, [assignments, hideSubmitted])
 
   // Timeline grouping: Overdue → Today → Tomorrow → This Week → Next Week → Later
   const timelineData = useMemo(() => {
@@ -385,6 +407,18 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     />
   )
 
+  const handleDismissOverdue = useCallback(async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/assignments/dismiss-overdue`, { method: 'POST' })
+      if (!res.ok) return
+      const data = await res.json()
+      fetchAssignments()
+      if (data.dismissed > 0) addToast(`Marked ${data.dismissed} overdue items as done`)
+    } catch (err) {
+      console.error('[Dashboard] dismiss-overdue error:', err)
+    }
+  }, [addToast])
+
   const renderTimelineGroup = (section) => {
     const items = timelineData[section.key]
     if (!items || items.length === 0) return null
@@ -403,6 +437,15 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
             <span className={`group-count ${section.urgency === 'overdue' ? 'count-overdue' : ''}`}>
               {items.length}
             </span>
+            {section.urgency === 'overdue' && items.length > 1 && (
+              <button
+                className="dismiss-overdue-btn"
+                onClick={(e) => { e.stopPropagation(); handleDismissOverdue() }}
+                title="Mark all overdue as done"
+              >
+                Mark all done
+              </button>
+            )}
           </div>
           {section.collapsible && (
             <svg
@@ -428,15 +471,14 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     )
   }
 
-  const logoutButton = onLogout ? (
-    <button className="logout-btn" onClick={onLogout} title="Sign out" aria-label="Sign out">
+  const settingsButton = (
+    <button className="logout-btn" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-        <polyline points="16 17 21 12 16 7" />
-        <line x1="21" y1="12" x2="9" y2="12" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
       </svg>
     </button>
-  ) : null
+  )
 
   // Loading state
   if (loading) {
@@ -449,7 +491,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               <span className="brand-name">CampusAI</span>
             </div>
             <div className="dash-header-actions">
-              {logoutButton}
+              {settingsButton}
             </div>
           </div>
         </header>
@@ -484,7 +526,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               <span className="brand-name">CampusAI</span>
             </div>
             <div className="dash-header-actions">
-              {logoutButton}
+              {settingsButton}
             </div>
           </div>
         </header>
@@ -547,6 +589,15 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               )}
               <span>AI Plan</span>
             </button>
+            {submittedCount > 0 && (
+              <button
+                className={`hide-submitted-btn ${hideSubmitted ? 'active' : ''}`}
+                onClick={() => setHideSubmitted((v) => !v)}
+                title={hideSubmitted ? 'Show submitted assignments' : 'Hide submitted assignments'}
+              >
+                {hideSubmitted ? `Show submitted (${submittedCount})` : 'Hide submitted'}
+              </button>
+            )}
             <SyncButton
               onSyncComplete={handleSyncComplete}
               triggerSync={triggerSync}
@@ -596,67 +647,75 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       )}
 
       <main className="dash-content">
-        {/* Welcome banner for first-time users */}
-        {hasNeverSynced && (
-          <div className="welcome-banner">
-            <div className="welcome-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
+        {/* Onboarding empty state for first-time users who have never synced */}
+        {hasNeverSynced && !isSyncing && (
+          <div className="onboarding-empty-state">
+            <div className="onboarding-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
               </svg>
             </div>
-            <div className="welcome-text">
-              <strong>Welcome to CampusAI</strong>
-              <span>Click Sync to import your assignments.</span>
-            </div>
+            <h2 className="onboarding-heading">Your courses aren&apos;t synced yet</h2>
+            <p className="onboarding-desc">Sync your Learning Suite and Canvas courses to see all your assignments in one place.</p>
+            <button
+              className="btn btn-primary onboarding-sync-btn"
+              onClick={() => setTriggerSync(true)}
+            >
+              Sync now
+            </button>
           </div>
         )}
 
-        {/* All-clear message when nothing is due today */}
-        {allClearToday && (
-          <div className="all-clear">
-            <div className="all-clear-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
+        {/* Main dashboard content — hidden during first-sync onboarding */}
+        {!(hasNeverSynced && !isSyncing) && (
+          <>
+            {/* All-clear message when nothing is due today */}
+            {allClearToday && (
+              <div className="all-clear">
+                <div className="all-clear-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+                <p className="all-clear-text">Nothing due today. You&apos;re all caught up!</p>
+              </div>
+            )}
+
+            {/* Proactive AI plan card */}
+            <ProactivePlan
+              suggestions={suggestions}
+              assignments={assignments}
+              involvementLevel={involvementLevel}
+              onOpenChat={() => openChatRef.current?.()}
+              onPlanApplied={fetchAssignments}
+              addToast={addToast}
+            />
+
+            {/* AI Briefing panel */}
+            <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
+
+            {/* Timeline */}
+            <div className="timeline">
+              {TIMELINE_SECTIONS.map(renderTimelineGroup)}
             </div>
-            <p className="all-clear-text">Nothing due today. You&apos;re all caught up!</p>
-          </div>
-        )}
 
-        {/* Proactive AI plan card */}
-        <ProactivePlan
-          suggestions={suggestions}
-          assignments={assignments}
-          involvementLevel={involvementLevel}
-          onOpenChat={() => openChatRef.current?.()}
-          onPlanApplied={fetchAssignments}
-          addToast={addToast}
-        />
-
-        {/* AI Briefing panel */}
-        <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
-
-        {/* Timeline */}
-        <div className="timeline">
-          {TIMELINE_SECTIONS.map(renderTimelineGroup)}
-        </div>
-
-        {/* Empty state when no assignments at all */}
-        {assignments.length === 0 && !hasNeverSynced && (
-          <div className="empty-state">
-            <div className="empty-state-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-              </svg>
-            </div>
-            <h3 className="empty-state-title">No assignments found</h3>
-            <p className="empty-state-desc">Try syncing again or check your Learning Suite / Canvas courses.</p>
-          </div>
+            {/* Empty state when no assignments at all */}
+            {assignments.length === 0 && !hasNeverSynced && (
+              <div className="empty-state">
+                <div className="empty-state-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                </div>
+                <h3 className="empty-state-title">No assignments found</h3>
+                <p className="empty-state-desc">Try syncing again or check your Learning Suite / Canvas courses.</p>
+              </div>
+            )}
+          </>
         )}
       </main>
 
@@ -672,6 +731,16 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       <AIChat addToast={addToast} involvementLevel={involvementLevel} openChatRef={openChatRef} />
 
       <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <Settings
+          onLogout={onLogout}
+          preferences={preferences}
+          onPreferencesChange={onPreferencesChange}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   )
 }

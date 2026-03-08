@@ -1,49 +1,40 @@
 """
 Canvas LMS authentication store.
 
-Manages a personal access token for the Canvas API.
-Follows the same pattern as auth_store.py (module-level state, disk persistence).
+Manages personal access tokens for the Canvas API on a per-user basis.
+Tokens are stored in memory and persisted to Supabase (canvas_tokens table)
+using the service role key so RLS doesn't block backend writes.
 """
 
-import json
+import logging
 import os
 import requests
 
-_TOKEN_FILE = os.path.join(os.path.dirname(__file__), ".canvas_token.json")
+logger = logging.getLogger(__name__)
+
 CANVAS_BASE_URL = "https://byu.instructure.com"
 
-_token: str | None = None
-_user_name: str | None = None
+# Per-user token store: user_id -> {token, user_name}
+_tokens: dict[str, dict] = {}
 
 
-def _save():
-    """Persist token to disk."""
-    try:
-        with open(_TOKEN_FILE, "w") as f:
-            json.dump({"token": _token, "user_name": _user_name}, f)
-    except Exception:
-        pass
-
-
-def _load():
-    """Load persisted token from disk at module import time."""
-    global _token, _user_name
-    if not os.path.exists(_TOKEN_FILE):
-        return
-    try:
-        with open(_TOKEN_FILE, "r") as f:
-            data = json.load(f)
-        _token = data.get("token")
-        _user_name = data.get("user_name")
-    except Exception:
-        pass
-
-
-_load()
+def _get_supabase():
+    """Create a Supabase client using the service key (bypasses RLS)."""
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+    if url and key:
+        try:
+            from supabase import create_client
+            return create_client(url, key)
+        except Exception as e:
+            logger.warning(f"canvas_auth_store: could not create Supabase client: {e}")
+    return None
 
 
 def validate_token(token: str) -> tuple[bool, str]:
     """Validate a Canvas API token by calling /api/v1/users/self.
+
+    Does not require a user_id — just validates the token against Canvas.
 
     Returns:
         Tuple of (is_valid, user_name_or_error_message)
@@ -70,35 +61,70 @@ def validate_token(token: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def set_token(token: str, user_name: str = ""):
-    """Store a validated Canvas token."""
-    global _token, _user_name
-    _token = token
-    _user_name = user_name
-    _save()
+def set_token(user_id: str, token: str, user_name: str = ""):
+    """Store a validated Canvas token for a user and persist to Supabase."""
+    _tokens[user_id] = {"token": token, "user_name": user_name}
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            from datetime import datetime, timezone
+            sb.table("canvas_tokens").upsert({
+                "user_id": user_id,
+                "token": token,
+                "user_name": user_name,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="user_id").execute()
+        except Exception as e:
+            logger.warning(f"canvas_auth_store: failed to persist token for {user_id}: {e}")
 
 
-def get_token() -> str | None:
-    """Get the stored Canvas token, or None."""
-    return _token
+def get_token(user_id: str) -> str | None:
+    """Get the stored Canvas token for a user.
+
+    Checks in-memory dict first, then loads from Supabase if not found.
+    """
+    if user_id in _tokens:
+        return _tokens[user_id].get("token")
+
+    # Try loading from Supabase
+    sb = _get_supabase()
+    if sb:
+        try:
+            r = sb.table("canvas_tokens").select("*").eq("user_id", user_id).execute()
+            if r.data:
+                row = r.data[0]
+                _tokens[user_id] = {
+                    "token": row.get("token"),
+                    "user_name": row.get("user_name") or "",
+                }
+                return _tokens[user_id]["token"]
+        except Exception as e:
+            logger.warning(f"canvas_auth_store: failed to load token for {user_id}: {e}")
+
+    return None
 
 
-def get_user_name() -> str | None:
-    """Get the stored Canvas user name."""
-    return _user_name
+def get_user_name(user_id: str) -> str | None:
+    """Get the stored Canvas user name for a user."""
+    if user_id not in _tokens:
+        # Trigger a load from Supabase via get_token
+        get_token(user_id)
+    return _tokens.get(user_id, {}).get("user_name")
 
 
-def clear_token():
-    """Clear the stored token."""
-    global _token, _user_name
-    _token = None
-    _user_name = None
-    try:
-        os.remove(_TOKEN_FILE)
-    except FileNotFoundError:
-        pass
+def clear_token(user_id: str):
+    """Clear the stored token for a user (memory + Supabase)."""
+    _tokens.pop(user_id, None)
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("canvas_tokens").delete().eq("user_id", user_id).execute()
+        except Exception as e:
+            logger.warning(f"canvas_auth_store: failed to delete token for {user_id}: {e}")
 
 
-def is_connected() -> bool:
-    """Check if a Canvas token is stored."""
-    return _token is not None
+def is_connected(user_id: str) -> bool:
+    """Check if a Canvas token is stored for a user."""
+    return get_token(user_id) is not None

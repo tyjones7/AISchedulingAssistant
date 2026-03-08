@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 import './ProactivePlan.css'
 
 const DISMISS_KEY = 'campus-ai-plan-dismissed'
@@ -57,7 +57,7 @@ export default function ProactivePlan({
     const generate = async () => {
       setIsGenerating(true)
       try {
-        const res = await fetch(`${API_BASE}/ai/suggestions/generate`, { method: 'POST' })
+        const res = await authFetch(`${API_BASE}/ai/suggestions/generate`, { method: 'POST' })
         if (res.ok) {
           const data = await res.json()
           const map = {}
@@ -96,9 +96,8 @@ export default function ProactivePlan({
     try {
       await Promise.all(
         toApply.map(({ suggestion, assignment }) =>
-          fetch(`${API_BASE}/assignments/${assignment.id}`, {
+          authFetch(`${API_BASE}/assignments/${assignment.id}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ planned_start: suggestion.suggested_start + 'T00:00:00.000Z' }),
           })
         )

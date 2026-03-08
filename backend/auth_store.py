@@ -3,9 +3,10 @@ Authentication store for BYU Learning Suite.
 
 Manages browser-based authentication where users log in directly on BYU's site.
 We store the authenticated session state, not passwords.
+
+Per-user sessions are stored in memory and persisted to Supabase (user_sessions table).
 """
 
-import json
 import logging
 import os
 import threading
@@ -15,8 +16,6 @@ logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 from typing import Optional
 from enum import Enum
-
-_SESSION_FILE = os.path.join(os.path.dirname(__file__), ".session_data.json")
 
 
 class BrowserAuthStatus(str, Enum):
@@ -41,62 +40,30 @@ class BrowserAuthTask:
         self.scraper = None  # Will hold the authenticated scraper
 
 
-# Store for browser auth tasks
+# Browser auth tasks are short-lived (one per login attempt) — no user_id needed
 _browser_auth_tasks: dict[str, BrowserAuthTask] = {}
 _browser_auth_lock = threading.Lock()
 
-# The currently authenticated scraper (if any)
-_authenticated_scraper = None
-_is_authenticated = False
-
-# Session data for headless scraping (cookies + URL extracted from visible browser)
-_session_cookies: list = []
-_dynamic_base_url: str = ""
-
-# Web storage data (localStorage/sessionStorage) for session persistence
-_local_storage: dict = {}
-_session_storage: dict = {}
+# Per-user session data: user_id -> {cookies, base_url, local_storage, session_storage}
+_sessions: dict[str, dict] = {}
 
 
-def _save_session():
-    """Persist session data (cookies, base_url, web storage) to disk."""
-    data = {
-        "cookies": _session_cookies,
-        "dynamic_base_url": _dynamic_base_url,
-        "local_storage": _local_storage,
-        "session_storage": _session_storage,
-    }
-    try:
-        with open(_SESSION_FILE, "w") as f:
-            json.dump(data, f)
-        os.chmod(_SESSION_FILE, 0o600)  # owner read/write only
-    except Exception as e:
-        logger.warning(f"Failed to save session to disk: {e}")
+def _get_supabase():
+    """Create a Supabase client using the service key (bypasses RLS)."""
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+    if url and key:
+        try:
+            from supabase import create_client
+            return create_client(url, key)
+        except Exception as e:
+            logger.warning(f"auth_store: could not create Supabase client: {e}")
+    return None
 
 
-def _load_session():
-    """Load persisted session data from disk at module import time."""
-    global _session_cookies, _dynamic_base_url, _is_authenticated
-    global _local_storage, _session_storage
-    if not os.path.exists(_SESSION_FILE):
-        return
-    try:
-        with open(_SESSION_FILE, "r") as f:
-            data = json.load(f)
-        cookies = data.get("cookies", [])
-        base_url = data.get("dynamic_base_url", "")
-        if cookies and base_url:
-            _session_cookies = cookies
-            _dynamic_base_url = base_url
-            _local_storage = data.get("local_storage", {})
-            _session_storage = data.get("session_storage", {})
-            _is_authenticated = True
-    except Exception as e:
-        logger.warning(f"Failed to load session from disk: {e}")
-
-
-_load_session()
-
+# ============================================================
+# Browser Auth Task API (unchanged — no user_id needed)
+# ============================================================
 
 def create_browser_auth_task() -> str:
     """Create a new browser auth task.
@@ -130,83 +97,138 @@ def update_browser_auth_status(task_id: str, status: BrowserAuthStatus, error: O
                 task.completed_at = datetime.now(timezone.utc)
 
 
-def set_authenticated(scraper=None):
-    """Mark as authenticated with an optional scraper instance."""
-    global _authenticated_scraper, _is_authenticated
-    _authenticated_scraper = scraper
-    _is_authenticated = True
+# ============================================================
+# Per-User Session API
+# ============================================================
 
-
-def set_session_data(cookies: list, dynamic_base_url: str):
+def set_session_data(user_id: str, cookies: list, dynamic_base_url: str):
     """Store session cookies and URL for headless scraping.
 
-    Called after visible browser login succeeds. The visible browser is then closed,
-    and these cookies are injected into a headless browser when sync starts.
+    Called after visible browser login succeeds. Persists to Supabase so the
+    session survives server restarts.
     """
-    global _session_cookies, _dynamic_base_url, _is_authenticated, _authenticated_scraper
-    _session_cookies = cookies
-    _dynamic_base_url = dynamic_base_url
-    _is_authenticated = True
-    _authenticated_scraper = None  # No live scraper — we use cookies instead
-    _save_session()
+    _sessions[user_id] = {
+        "cookies": cookies,
+        "base_url": dynamic_base_url,
+        "local_storage": _sessions.get(user_id, {}).get("local_storage", {}),
+        "session_storage": _sessions.get(user_id, {}).get("session_storage", {}),
+    }
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("user_sessions").upsert({
+                "user_id": user_id,
+                "cookies": cookies,
+                "base_url": dynamic_base_url,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="user_id").execute()
+        except Exception as e:
+            logger.warning(f"auth_store: failed to persist session for {user_id}: {e}")
 
 
-def set_web_storage(local_storage: dict, session_storage: dict):
+def set_web_storage(user_id: str, local_storage: dict, session_storage: dict):
     """Store localStorage and sessionStorage data from the visible browser.
 
     Some sites use web storage for session validation alongside cookies.
     This data is injected into the headless browser along with cookies.
     """
-    global _local_storage, _session_storage
-    _local_storage = local_storage or {}
-    _session_storage = session_storage or {}
-    _save_session()
+    if user_id not in _sessions:
+        _sessions[user_id] = {"cookies": [], "base_url": "", "local_storage": {}, "session_storage": {}}
+    _sessions[user_id]["local_storage"] = local_storage or {}
+    _sessions[user_id]["session_storage"] = session_storage or {}
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("user_sessions").upsert({
+                "user_id": user_id,
+                "local_storage": local_storage or {},
+                "session_storage": session_storage or {},
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="user_id").execute()
+        except Exception as e:
+            logger.warning(f"auth_store: failed to persist web storage for {user_id}: {e}")
 
 
-def get_web_storage() -> tuple:
+def get_session_data(user_id: str) -> tuple:
+    """Get stored session cookies and dynamic base URL.
+
+    Checks in-memory dict first, then loads from Supabase if not found.
+
+    Returns:
+        Tuple of (cookies list, dynamic_base_url string)
+    """
+    if user_id in _sessions:
+        s = _sessions[user_id]
+        return s.get("cookies", []), s.get("base_url", "")
+
+    # Try loading from Supabase
+    sb = _get_supabase()
+    if sb:
+        try:
+            r = sb.table("user_sessions").select("*").eq("user_id", user_id).execute()
+            if r.data:
+                row = r.data[0]
+                _sessions[user_id] = {
+                    "cookies": row.get("cookies") or [],
+                    "base_url": row.get("base_url") or "",
+                    "local_storage": row.get("local_storage") or {},
+                    "session_storage": row.get("session_storage") or {},
+                }
+                return _sessions[user_id]["cookies"], _sessions[user_id]["base_url"]
+        except Exception as e:
+            logger.warning(f"auth_store: failed to load session for {user_id}: {e}")
+
+    return [], ""
+
+
+def get_web_storage(user_id: str) -> tuple:
     """Get stored localStorage and sessionStorage data.
 
     Returns:
         Tuple of (local_storage dict, session_storage dict)
     """
-    return _local_storage, _session_storage
+    if user_id not in _sessions:
+        # Trigger a load from Supabase (get_session_data populates the full record)
+        get_session_data(user_id)
+
+    s = _sessions.get(user_id, {})
+    return s.get("local_storage", {}), s.get("session_storage", {})
 
 
-def get_session_data() -> tuple:
-    """Get stored session cookies and dynamic base URL.
+def get_authenticated_scraper(user_id: str = None):
+    """Get the authenticated scraper if available.
 
-    Returns:
-        Tuple of (cookies list, dynamic_base_url string)
+    Scrapers are not stored per-user (they are ephemeral during sync).
+    Returns None always — the HTTP-only session path is used for syncs.
     """
-    return _session_cookies, _dynamic_base_url
+    return None
 
 
-def get_authenticated_scraper():
-    """Get the authenticated scraper if available."""
-    return _authenticated_scraper
+def is_authenticated(user_id: str) -> bool:
+    """Check if a user has a stored session (cookies + base_url)."""
+    cookies, base_url = get_session_data(user_id)
+    return bool(cookies and base_url)
 
 
-def is_authenticated() -> bool:
-    """Check if user is authenticated."""
-    return _is_authenticated
+def clear_authentication(user_id: str):
+    """Clear authentication state for a user (memory + Supabase)."""
+    _sessions.pop(user_id, None)
 
-
-def clear_authentication():
-    """Clear authentication state."""
-    global _authenticated_scraper, _is_authenticated, _session_cookies, _dynamic_base_url
-    global _local_storage, _session_storage
-    if _authenticated_scraper:
+    sb = _get_supabase()
+    if sb:
         try:
-            _authenticated_scraper.close()
-        except:
-            pass
-    _authenticated_scraper = None
-    _is_authenticated = False
-    _session_cookies = []
-    _dynamic_base_url = ""
-    _local_storage = {}
-    _session_storage = {}
-    try:
-        os.remove(_SESSION_FILE)
-    except FileNotFoundError:
-        pass
+            sb.table("user_sessions").delete().eq("user_id", user_id).execute()
+        except Exception as e:
+            logger.warning(f"auth_store: failed to delete session for {user_id}: {e}")
+
+
+# ──────────────────────────────────────────────────────────────
+# Legacy no-op: set_authenticated is called from browser auth
+# thread after a successful login (before set_session_data).
+# Kept so existing call sites don't break.
+# ──────────────────────────────────────────────────────────────
+def set_authenticated(scraper=None):
+    """No-op — superseded by set_session_data(user_id, ...)."""
+    pass

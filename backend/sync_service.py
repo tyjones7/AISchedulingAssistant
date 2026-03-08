@@ -38,11 +38,13 @@ class SyncStatus(str, Enum):
 class SyncTask:
     """Represents a single sync task with its state."""
 
-    def __init__(self, task_id: str):
+    def __init__(self, task_id: str, user_id: str):
         self.task_id = task_id
+        self.user_id = user_id
         self.status = SyncStatus.PENDING
         self.message = "Initializing sync..."
         self.error: Optional[str] = None
+        self.warnings: list[str] = []
         self.started_at = datetime.now(timezone.utc)
         self.completed_at: Optional[datetime] = None
         self.assignments_added = 0
@@ -78,17 +80,18 @@ class SyncService:
         self._setup_supabase()
 
     def _setup_supabase(self):
-        """Set up Supabase client."""
+        """Set up Supabase client using service role key so RLS doesn't block writes."""
         url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
+        # Prefer service key — bypasses RLS so sync can write for any user
+        key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
         if url and key:
             self.supabase = create_client(url, key)
         else:
             self.supabase = None
             logger.warning("Supabase credentials not found")
 
-    def start_sync(self) -> tuple[str, Optional[str]]:
-        """Start a new sync task.
+    def start_sync(self, user_id: str) -> tuple[str, Optional[str]]:
+        """Start a new sync task for a specific user.
 
         Returns:
             Tuple of (task_id, error_message). error_message is None if successful.
@@ -98,16 +101,26 @@ class SyncService:
             if self._current_task_id:
                 current_task = self._tasks.get(self._current_task_id)
                 if current_task and current_task.status not in [SyncStatus.COMPLETED, SyncStatus.FAILED]:
-                    return "", "Sync already in progress"
+                    # Auto-expire syncs that have been running for more than 10 minutes —
+                    # this handles crashes/hangs that leave _current_task_id set forever.
+                    elapsed = (datetime.now(timezone.utc) - current_task.started_at).total_seconds()
+                    if elapsed > 600:
+                        logger.warning(f"Sync [{self._current_task_id[:8]}] appears stuck ({elapsed:.0f}s), force-expiring")
+                        current_task.status = SyncStatus.FAILED
+                        current_task.error = "Sync timed out after 10 minutes"
+                        current_task.completed_at = datetime.now(timezone.utc)
+                        self._current_task_id = None
+                    else:
+                        return "", "Sync already in progress"
 
             # Create new task
             task_id = str(uuid.uuid4())
-            task = SyncTask(task_id)
+            task = SyncTask(task_id, user_id)
             self._tasks[task_id] = task
             self._current_task_id = task_id
 
         # Start sync in background thread
-        thread = threading.Thread(target=self._run_sync, args=(task_id,), daemon=True)
+        thread = threading.Thread(target=self._run_sync, args=(task_id, user_id), daemon=True)
         thread.start()
 
         return task_id, None
@@ -130,6 +143,7 @@ class SyncService:
             "status": task.status.value,
             "message": task.message,
             "error": task.error,
+            "warnings": task.warnings,
             "started_at": task.started_at.isoformat(),
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             "assignments_added": task.assignments_added,
@@ -140,8 +154,8 @@ class SyncService:
             "current_course_name": task.current_course_name,
         }
 
-    def get_last_sync(self) -> Optional[dict]:
-        """Get the last sync metadata from the database.
+    def get_last_sync(self, user_id: str) -> Optional[dict]:
+        """Get the last sync metadata from the database for a specific user.
 
         Returns:
             Dict with last sync info, or None if no syncs recorded
@@ -150,7 +164,9 @@ class SyncService:
             return None
 
         try:
-            response = self.supabase.table("sync_metadata").select("*").order(
+            response = self.supabase.table("sync_metadata").select("*").eq(
+                "user_id", user_id
+            ).order(
                 "last_sync_at", desc=True
             ).limit(1).execute()
 
@@ -170,7 +186,7 @@ class SyncService:
                 task.message = message
                 logger.info(f"Sync [{task_id[:8]}]: {status.value} - {message}")
 
-    def _run_sync(self, task_id: str):
+    def _run_sync(self, task_id: str, user_id: str):
         """Run the sync process in a background thread.
 
         Includes resilience features:
@@ -185,8 +201,8 @@ class SyncService:
         scraper = None
         should_close_scraper = False
 
-        ls_authenticated = auth_store.is_authenticated()
-        canvas_token = canvas_auth_store.get_token()
+        ls_authenticated = auth_store.is_authenticated(user_id)
+        canvas_token = canvas_auth_store.get_token(user_id)
 
         if not ls_authenticated and not canvas_token:
             with self._task_lock:
@@ -194,67 +210,47 @@ class SyncService:
                 task.error = "Not authenticated. Please connect Learning Suite or Canvas first."
                 task.message = f"Sync failed: {task.error}"
                 task.completed_at = datetime.now(timezone.utc)
-            self._save_sync_metadata(task_id, "failed", None, task.error)
+            self._save_sync_metadata(task_id, user_id, "failed", None, task.error)
             return
 
         try:
             # ---- Learning Suite sync ----
             if ls_authenticated:
                 self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Checking authentication...")
-                logger.info(f"Sync [{task_id[:8]}] - Checking for authenticated session...")
+                logger.info(f"Sync [{task_id[:8]}] user={user_id[:8]} - Checking for authenticated session...")
 
-                cookies, base_url = auth_store.get_session_data()
-                local_storage, session_storage = auth_store.get_web_storage()
+                cookies, base_url = auth_store.get_session_data(user_id)
+                local_storage, session_storage = auth_store.get_web_storage(user_id)
 
                 if cookies and base_url:
-                    logger.info(f"Sync [{task_id[:8]}] - Found stored cookies ({len(cookies)}), creating headless browser...")
-                    if local_storage:
-                        logger.info(f"Sync [{task_id[:8]}] - Also found {len(local_storage)} localStorage items")
-                    if session_storage:
-                        logger.info(f"Sync [{task_id[:8]}] - Also found {len(session_storage)} sessionStorage items")
-
-                    self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Starting headless browser...")
-
-                    scraper = LearningSuiteScraper(headless=True)
-                    scraper._setup_driver()
-                    should_close_scraper = True
+                    logger.info(f"Sync [{task_id[:8]}] - Found stored cookies ({len(cookies)}), initializing HTTP-only mode...")
 
                     self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Restoring session...")
-                    if not scraper.inject_cookies(cookies, base_url,
-                                                  local_storage=local_storage,
-                                                  session_storage=session_storage):
-                        scraper.close()
+
+                    scraper = LearningSuiteScraper()
+                    # Inject user_id so the scraper's update_database writes per-user rows
+                    scraper.user_id = user_id
+                    if self.supabase:
+                        scraper.supabase = self.supabase
+                    should_close_scraper = True
+
+                    if not scraper.init_http_only(cookies, base_url):
                         scraper = None
-                        auth_store.clear_authentication()
+                        auth_store.clear_authentication(user_id)
                         logger.warning(f"Sync [{task_id[:8]}] - LS session expired")
+                        with self._task_lock:
+                            task.warnings.append(
+                                "Learning Suite session expired — please reconnect to re-sync your LS courses."
+                            )
                     else:
                         self._update_task(task_id, SyncStatus.SCRAPING, "Session restored, scraping...")
                 else:
-                    # Fallback: check if there's a live authenticated scraper
-                    existing = auth_store.get_authenticated_scraper()
-
-                    if existing and existing.driver:
-                        scraper = existing
-                        logger.info(f"Sync [{task_id[:8]}] - Using existing authenticated session")
-                        self._update_task(task_id, SyncStatus.SCRAPING, "Using authenticated session...")
-                        should_close_scraper = False
-                    else:
-                        logger.info(f"Sync [{task_id[:8]}] - No session data, trying headless...")
-                        self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Starting browser...")
-
-                        scraper = LearningSuiteScraper(headless=True)
-                        should_close_scraper = True
-                        scraper._setup_driver()
-
-                        self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Checking login status...")
-                        already_logged_in = scraper.check_already_logged_in()
-
-                        if already_logged_in:
-                            self._update_task(task_id, SyncStatus.SCRAPING, "Session found, scraping...")
-                        else:
-                            scraper.close()
-                            scraper = None
-                            logger.warning(f"Sync [{task_id[:8]}] - LS headless check failed")
+                    # Fallback: no cookies stored (shouldn't happen after login, but handle gracefully)
+                    logger.warning(f"Sync [{task_id[:8]}] - No stored cookies for user {user_id[:8]}, please reconnect")
+                    with self._task_lock:
+                        task.warnings.append(
+                            "Learning Suite session data missing — please reconnect in Settings."
+                        )
 
                 if scraper:
                     # Define progress callback that updates task fields thread-safely
@@ -288,18 +284,13 @@ class SyncService:
                             logger.info(f"Sync [{task_id[:8]}] - Session error detected, attempting recovery...")
                             self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Session lost, attempting recovery...")
 
-                            try:
-                                scraper.close()
-                            except:
-                                pass
-
-                            scraper = LearningSuiteScraper(headless=True)
-                            scraper._setup_driver()
+                            scraper = LearningSuiteScraper()
+                            scraper.user_id = user_id
+                            if self.supabase:
+                                scraper.supabase = self.supabase
                             should_close_scraper = True
 
-                            if scraper.inject_cookies(cookies, base_url,
-                                                      local_storage=local_storage,
-                                                      session_storage=session_storage):
+                            if scraper.init_http_only(cookies, base_url):
                                 logger.info(f"Sync [{task_id[:8]}] - Recovery successful, retrying scrape...")
                                 self._update_task(task_id, SyncStatus.SCRAPING, "Recovered, retrying scrape...")
                                 assignments = scraper.scrape_all_courses(
@@ -307,7 +298,11 @@ class SyncService:
                                     save_per_course=True
                                 )
                             else:
-                                auth_store.clear_authentication()
+                                auth_store.clear_authentication(user_id)
+                                with self._task_lock:
+                                    task.warnings.append(
+                                        "Some Learning Suite courses could not be synced due to a session error."
+                                    )
                                 raise ValueError("Session expired during sync and could not be recovered. Please sign in again.")
                         else:
                             raise
@@ -345,7 +340,12 @@ class SyncService:
                 try:
                     canvas = CanvasClient(canvas_token)
                     canvas_assignments = canvas.scrape_all_courses(progress_callback=canvas_progress)
-                    canvas_result = canvas.update_database(canvas_assignments)
+                    # Pass the service-role supabase client and user_id so RLS is bypassed
+                    canvas_result = canvas.update_database(
+                        canvas_assignments,
+                        supabase_client=self.supabase,
+                        user_id=user_id,
+                    )
 
                     with self._task_lock:
                         task.assignments_added += canvas_result.get("new", 0)
@@ -367,7 +367,7 @@ class SyncService:
             }
 
             self._update_task(task_id, SyncStatus.UPDATING_DB, "Updating sync metadata...")
-            self._save_sync_metadata(task_id, "success", result)
+            self._save_sync_metadata(task_id, user_id, "success", result)
 
             with self._task_lock:
                 task.status = SyncStatus.COMPLETED
@@ -387,7 +387,7 @@ class SyncService:
                 task.completed_at = datetime.now(timezone.utc)
 
             # Save failed sync to metadata
-            self._save_sync_metadata(task_id, "failed", None, error_msg)
+            self._save_sync_metadata(task_id, user_id, "failed", None, error_msg)
 
         finally:
             if scraper and should_close_scraper:
@@ -400,13 +400,12 @@ class SyncService:
                 if self._current_task_id == task_id:
                     self._current_task_id = None
 
-    def _save_sync_metadata(self, task_id: str, status: str, result: Optional[dict], error: Optional[str] = None):
+    def _save_sync_metadata(self, task_id: str, user_id: str, status: str, result: Optional[dict], error: Optional[str] = None):
         """Save sync result to the sync_metadata table."""
         if not self.supabase:
             return
 
         try:
-            task = self._tasks.get(task_id)
             summary = None
             if result:
                 summary = {
@@ -416,6 +415,7 @@ class SyncService:
                 }
 
             self.supabase.table("sync_metadata").insert({
+                "user_id": user_id,
                 "last_sync_at": datetime.now(timezone.utc).isoformat(),
                 "last_sync_status": status,
                 "last_sync_summary": summary,

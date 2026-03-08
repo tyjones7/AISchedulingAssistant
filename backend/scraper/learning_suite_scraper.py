@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import requests as _requests
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -104,6 +106,7 @@ class LearningSuiteScraper:
         self.headless = headless
         self.debug = debug
         self.supabase = None
+        self.user_id = None  # Set by sync_service before scraping for per-user DB writes
         self.dynamic_base_url = None  # Set after login to include session segment (e.g., /.DaEo)
         self._injected_cookies = []  # Store cookies for re-injection
         self._injected_base_url = ""  # Store base URL for re-injection
@@ -113,12 +116,13 @@ class LearningSuiteScraper:
         self._last_session_check = None  # Track last session validity check time
         self._session_refresh_count = 0  # Track how many times we've refreshed
         self._max_session_refreshes = 3  # Max refreshes before giving up
+        self._http_session = None  # requests.Session built from browser cookies
         self._setup_supabase()
 
     def _setup_supabase(self):
-        """Set up Supabase client."""
+        """Set up Supabase client. Prefers service key to bypass RLS for backend writes."""
         url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
+        key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
         if url and key:
             self.supabase = create_client(url, key)
             logger.info("Supabase client initialized")
@@ -249,13 +253,48 @@ class LearningSuiteScraper:
         options.add_argument("--log-level=3")
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
-        # Anti-detection: make headless browser look like a regular browser
-        if self.headless:
+        if not self.headless:
+            # Persistent profile so LS session cookies and Duo device trust survive
+            # between logins. Stored separately from the user's main Chrome profile
+            # so there's no conflict when Chrome is already open.
+            profile_dir = os.path.expanduser("~/.campusai_chrome_profile")
+            os.makedirs(profile_dir, exist_ok=True)
+
+            # Remove stale lock files that cause "session not created" when a
+            # previous Chrome/Selenium session crashed without a clean shutdown.
+            for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                lock_path = os.path.join(profile_dir, lock_name)
+                if os.path.exists(lock_path):
+                    try:
+                        os.remove(lock_path)
+                        logger.info(f"Removed stale Chrome lock: {lock_path}")
+                    except OSError:
+                        pass
+
+            options.add_argument(f"--user-data-dir={profile_dir}")
+            logger.info(f"Using persistent Chrome profile: {profile_dir}")
+
+            # Remove "Chrome is being controlled by automated software" banner
+            options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
+            options.add_experimental_option('useAutomationExtension', False)
+        else:
+            # Anti-detection: make headless browser look like a regular browser
             options.add_argument("--disable-blink-features=AutomationControlled")
             options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-        logger.info("Installing/finding ChromeDriver...")
-        service = Service(ChromeDriverManager().install())
+        # Use CHROMIUM_PATH env var when running in Docker/Render (avoids ChromeDriverManager)
+        chromium_path = os.getenv("CHROMIUM_PATH")
+        if chromium_path and os.path.exists(chromium_path):
+            options.binary_location = chromium_path
+            # On Linux, chromedriver is at the same prefix
+            chromedriver_path = chromium_path.replace("chromium", "chromedriver")
+            if not os.path.exists(chromedriver_path):
+                chromedriver_path = "/usr/bin/chromedriver"
+            service = Service(chromedriver_path)
+            logger.info(f"Using system Chromium: {chromium_path}")
+        else:
+            logger.info("Installing/finding ChromeDriver...")
+            service = Service(ChromeDriverManager().install())
         logger.info("Starting Chrome browser...")
         self.driver = webdriver.Chrome(service=service, options=options)
         self.driver.implicitly_wait(10)
@@ -354,6 +393,9 @@ class LearningSuiteScraper:
                 self._inject_web_storage(self._local_storage, 'localStorage')
             if self._session_storage:
                 self._inject_web_storage(self._session_storage, 'sessionStorage')
+
+            # Build HTTP session so page fetches don't need Selenium navigation
+            self._build_http_session()
 
             return True
 
@@ -473,8 +515,8 @@ class LearningSuiteScraper:
     def _keepalive(self):
         """Send a keep-alive request to prevent session timeout.
 
-        Navigates to the Learning Suite home page to refresh the session timer.
-        Should be called periodically between courses during long scrapes.
+        Uses the HTTP session when available (fast: ~0.3s) and falls back to
+        Selenium navigation (slow: ~3s). Called periodically between courses.
         """
         try:
             now = time.time()
@@ -483,20 +525,153 @@ class LearningSuiteScraper:
                 return
 
             logger.debug("Sending session keep-alive...")
-            # Touch the base URL to refresh the session timer
-            self.driver.get(f"{self._get_base_url()}/student/top")
-            self._wait_for_page_ready(3)
+            keepalive_url = f"{self._get_base_url()}/student/top"
 
-            # Verify we're still logged in
-            if not self._check_session_valid():
-                logger.warning("Keep-alive detected session expiry, attempting refresh...")
-                self._refresh_session()
+            if self._http_session:
+                # HTTP keepalive: no browser overhead, ~0.3s
+                html = self._http_get(keepalive_url, timeout=10)
+                if html is None:
+                    logger.warning("HTTP keepalive: session expired, attempting refresh...")
+                    if self._refresh_session():
+                        self._build_http_session()
+                else:
+                    self._last_keepalive = time.time()
+                    logger.debug("HTTP keep-alive successful")
             else:
-                self._last_keepalive = time.time()
-                logger.info("Keep-alive successful")
+                # Selenium fallback
+                self.driver.get(keepalive_url)
+                self._wait_for_page_ready(3)
+                if not self._check_session_valid():
+                    logger.warning("Keep-alive detected session expiry, attempting refresh...")
+                    self._refresh_session()
+                else:
+                    self._last_keepalive = time.time()
+                    logger.info("Keep-alive successful")
 
         except Exception as e:
             logger.debug(f"Keep-alive error (non-fatal): {e}")
+
+    def init_http_only(self, cookies: list, base_url: str) -> bool:
+        """Initialize in HTTP-only mode — no Chrome browser needed.
+
+        Builds the HTTP session directly from stored cookies so sync runs
+        without opening any browser window.  The browser is only needed once
+        (for the initial login); after that every sync uses this path.
+
+        Args:
+            cookies: Stored cookie dicts from auth_store
+            base_url: Dynamic base URL saved at login time
+
+        Returns:
+            True if the session is still valid, False if cookies have expired.
+        """
+        self.dynamic_base_url = base_url
+        self._injected_cookies = cookies
+        self._injected_base_url = base_url
+        self._last_keepalive = time.time()
+
+        # Build HTTP session directly — no browser involved
+        self._build_http_session_from_cookies(cookies)
+
+        # Verify the session is still alive with a lightweight request
+        test_url = f"{self._get_base_url()}/student/top"
+        html = self._http_get(test_url, timeout=15)
+        if html is None:
+            # Try the bare (non-session) URL as a fallback
+            html = self._http_get(f"{self.LEARNING_SUITE_URL}/student/top", timeout=15)
+        if html is None:
+            logger.warning("init_http_only: session appears expired (no HTML returned)")
+            return False
+
+        logger.info(f"init_http_only: session valid, base={self.dynamic_base_url}")
+        return True
+
+    def _build_http_session_from_cookies(self, cookies: list):
+        """Build an HTTP session from a cookie list (no browser required)."""
+        session = _requests.Session()
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://learningsuite.byu.edu/",
+        })
+        for c in cookies:
+            session.cookies.set(
+                c["name"],
+                c["value"],
+                domain=c.get("domain", ".learningsuite.byu.edu"),
+                path=c.get("path", "/"),
+            )
+        self._http_session = session
+        logger.info(f"Built HTTP session from {len(cookies)} stored cookies (no browser)")
+        return session
+
+    def _build_http_session(self):
+        """Build a requests.Session with current browser cookies.
+
+        Enables fast HTML fetching without browser rendering overhead.
+        Should be called after every successful login or cookie injection.
+        """
+        if self.driver:
+            browser_cookies = self.driver.get_cookies()
+            self._build_http_session_from_cookies(browser_cookies)
+            logger.info(f"Built HTTP session with {len(browser_cookies)} browser cookies")
+        else:
+            # No browser — build from stored injected cookies if available
+            if self._injected_cookies:
+                self._build_http_session_from_cookies(self._injected_cookies)
+            else:
+                self._http_session = _requests.Session()
+        return self._http_session
+
+    def _http_get(self, url: str, timeout: int = 30) -> Optional[str]:
+        """Fetch a URL via HTTP using the authenticated session.
+
+        Much faster than Selenium navigation since it skips browser rendering,
+        JS execution, and all Chrome overhead (~0.3s vs ~3-5s per page).
+
+        Returns:
+            HTML text on success, None if request failed or redirected to login.
+        """
+        if not self._http_session:
+            self._build_http_session()
+        if not self._http_session:
+            return None
+
+        try:
+            resp = self._http_session.get(url, timeout=timeout, allow_redirects=True)
+            final_url = resp.url
+
+            # Redirected to auth — session cookies have expired
+            if "cas.byu.edu" in final_url or "duo" in final_url.lower():
+                logger.warning(f"HTTP: redirected to auth for {url}")
+                return None
+            if any(x in final_url.lower() for x in ("saml", "/idp/", "authenticate")):
+                logger.warning(f"HTTP: redirected to SSO for {url}")
+                return None
+
+            if resp.status_code != 200:
+                logger.debug(f"HTTP GET {url} → {resp.status_code}")
+                return None
+
+            # Keep dynamic_base_url current if LS redirected to a new session segment
+            new_base_match = re.match(
+                r'(https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+)', final_url
+            )
+            if new_base_match:
+                new_base = new_base_match.group(1)
+                if new_base != self.dynamic_base_url:
+                    logger.info(f"HTTP: session segment updated → {new_base}")
+                    self.dynamic_base_url = new_base
+
+            return resp.text
+
+        except Exception as e:
+            logger.debug(f"HTTP GET error for {url}: {e}")
+            return None
 
     def _save_debug_html(self, label: str = ""):
         """Save current page source to debug.html for offline analysis.
@@ -948,6 +1123,9 @@ class LearningSuiteScraper:
                     self.dynamic_base_url = self._extract_dynamic_base_url()
                     logger.info(f"Session base URL set to: {self.dynamic_base_url}")
 
+                    # Build HTTP session for fast page fetching
+                    self._build_http_session()
+
                     logger.info("Successfully logged in to Learning Suite")
                     self._save_debug_html("login_success")
                     return True
@@ -970,6 +1148,72 @@ class LearningSuiteScraper:
             logger.info(f"Already logged in to Learning Suite (base: {self.dynamic_base_url})")
             return True
 
+    def _get_courses_http(self) -> list[dict]:
+        """Discover enrolled courses via HTTP (no browser required).
+
+        Fetches the LS home page HTML and applies the same regex patterns
+        used by the Selenium version to extract course names and CIDs.
+        """
+        from bs4 import BeautifulSoup
+
+        url = f"{self._get_base_url()}/student/top"
+        html = self._http_get(url)
+        if not html:
+            html = self._http_get(f"{self.LEARNING_SUITE_URL}/student/top")
+        if not html:
+            logger.warning("_get_courses_http: could not fetch home page")
+            return []
+
+        courses = []
+        seen_cids = set()
+        course_pattern = r'([A-Z]{1,5}(?:\s+[A-Z])?\s+\d{3}[A-Z]?\s*\([^)]+\)\s*-\s*[^\n<]+)'
+
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            cid_links = soup.find_all('a', href=re.compile(r'cid-'))
+
+            for link in cid_links:
+                href = link.get('href', '')
+                cid_match = re.search(r'cid-([A-Za-z0-9_-]+)', href)
+                if not cid_match:
+                    continue
+                cid = cid_match.group(1)
+                if cid in seen_cids:
+                    continue
+
+                # Pass 1: match in link text itself
+                link_text = link.get_text(separator=' ', strip=True)
+                name_match = re.search(course_pattern, link_text)
+                if name_match:
+                    course_name = re.sub(r'\s+(Go|View|Open)\s*$', '', name_match.group(1)).strip()
+                    if re.match(r'^[A-Z]{1,5}(?:\s+[A-Z])?\s+\d{3}', course_name):
+                        seen_cids.add(cid)
+                        courses.append({"name": course_name, "cid": cid, "url": href})
+                        continue
+
+                # Pass 2: walk up to 4 ancestor elements
+                parent = link.parent
+                for _ in range(4):
+                    if parent is None:
+                        break
+                    parent_text = parent.get_text(separator=' ', strip=True)
+                    name_match = re.search(course_pattern, parent_text)
+                    if name_match:
+                        course_name = re.sub(r'\s+(Go|View|Open)\s*$', '', name_match.group(1)).strip()
+                        if re.match(r'^[A-Z]{1,5}(?:\s+[A-Z])?\s+\d{3}', course_name):
+                            seen_cids.add(cid)
+                            courses.append({"name": course_name, "cid": cid, "url": href})
+                            break
+                    parent = parent.parent
+
+        except Exception as e:
+            logger.error(f"_get_courses_http error: {e}")
+
+        logger.info(f"HTTP course discovery: found {len(courses)} courses")
+        for c in courses:
+            logger.info(f"  {c['name']} (cid-{c['cid']})")
+        return courses
+
     def get_courses(self) -> list[dict]:
         """Extract list of enrolled courses.
 
@@ -978,6 +1222,10 @@ class LearningSuiteScraper:
         Returns:
             List of course dictionaries with 'name' and 'cid' keys
         """
+        # HTTP-only mode: no browser available, use HTTP + BeautifulSoup
+        if not self.driver:
+            return self._get_courses_http()
+
         courses = []
         logger.debug("\n" + "=" * 80)
         logger.debug("EXTRACTING COURSE LIST")
@@ -1304,111 +1552,56 @@ class LearningSuiteScraper:
 
         base_url = self._get_base_url()
 
-        # DETAILED LOGGING
-        logger.debug("\n" + "=" * 70)
-        logger.debug(f">>> SCRAPING GRADES → ASSIGNMENTS VIEW (PRIMARY SOURCE)")
-        logger.debug(f">>> COURSE: {course_name}")
-        logger.debug(f">>> CID: {cid}")
-        logger.debug("=" * 70)
+        logger.debug(f">>> SCRAPING GRADES → ASSIGNMENTS: {course_name} (cid: {cid})")
 
-        # Navigate to course first, then to Grades → Assignments.
-        # If course home errors (some courses have a blank/restricted home page),
-        # don't bail — fall through so we can try the gradebook URL directly below.
-        course_url = f"{base_url}/cid-{cid}"
-        if not self._safe_navigate(course_url, f"course home - {course_name}"):
-            logger.debug(f"WARNING: Could not access course home for {course_name}, will try gradebook URL directly")
-
-        # Try to click on Grades link in the sidebar/navigation
-        grades_clicked = False
-        try:
-            # Look for Grades link in various locations
-            grades_selectors = [
-                "a[href*='gradebook']",
-                "a[href*='grades']",
-                "//a[contains(text(), 'Grades')]",
-                "//a[contains(text(), 'Grade')]",
-                ".nav a[href*='grade']",
-                "[class*='sidebar'] a[href*='grade']",
-            ]
-
-            for selector in grades_selectors:
-                try:
-                    if selector.startswith("//"):
-                        element = self.driver.find_element(By.XPATH, selector)
-                    else:
-                        element = self.driver.find_element(By.CSS_SELECTOR, selector)
-
-                    if element and element.is_displayed():
-                        element.click()
-                        grades_clicked = True
-                        logger.debug(f"Clicked Grades link via: {selector}")
-                        self._wait_for_page_ready()
-                        break
-                except (NoSuchElementException, StaleElementReferenceException, TimeoutException):
-                    continue
-        except Exception as e:
-            logger.debug(f"Could not click Grades link: {e}")
-
-        # If clicking didn't work, try direct URL navigation
-        if not grades_clicked:
-            grades_urls = [
-                f"{base_url}/cid-{cid}/student/gradebook",
-                f"{base_url}/cid-{cid}/gradebook",
-            ]
-
-            for url in grades_urls:
-                if self._safe_navigate(url, f"grades page - {course_name}"):
-                    grades_clicked = True
+        # ── HTTP FAST PATH ──────────────────────────────────────────────────────
+        # Fetch the gradebook HTML directly without loading it in Chrome.
+        # The embedded `var assignments = [...]` JS is in the server-rendered HTML,
+        # so we don't need the browser to execute any JavaScript.
+        # Typical speed: ~0.3-1s per course vs ~3-5s for Selenium navigation.
+        gradebook_paths = [
+            f"/cid-{cid}/student/gradebook/assignments",
+            f"/cid-{cid}/student/gradebook",
+            f"/cid-{cid}/gradebook",
+        ]
+        for path in gradebook_paths:
+            # Try session-prefixed URL first (most direct), then bare cid- URL
+            for fetch_url in [f"{base_url}{path}", f"{self.LEARNING_SUITE_URL}{path}"]:
+                html_text = self._http_get(fetch_url)
+                if html_text:
+                    js_assignments = self._extract_js_assignments(html_text, course_name, cid)
+                    if js_assignments:
+                        logger.info(f"[HTTP] {course_name}: {len(js_assignments)} assignments")
+                        return js_assignments
+                    # Got HTML but no JS data — no point trying the bare URL
                     break
 
-        if not grades_clicked:
-            logger.debug(f"WARNING: Could not access grades for {course_name}")
+        logger.debug(f"HTTP fast path: no embedded JS for {course_name}, falling back to Selenium")
+
+        # ── SELENIUM FALLBACK ───────────────────────────────────────────────────
+        if not self.driver:
+            logger.debug(f"HTTP-only mode: no JS data found for {course_name}, skipping Selenium fallback")
             return assignments
 
-        # Now try to click on "Assignments" sub-tab within Grades
-        assignments_view_clicked = False
-        try:
-            assignments_selectors = [
-                "a[href*='assignments']",
-                "//a[contains(text(), 'Assignments')]",
-                "//a[contains(text(), 'Assignment')]",
-                "//button[contains(text(), 'Assignments')]",
-                "[class*='tab'] a[href*='assignment']",
-                ".gradebook-nav a",
-            ]
+        navigated = False
+        gradebook_urls = [
+            f"{base_url}/cid-{cid}/student/gradebook/assignments",
+            f"{base_url}/cid-{cid}/student/gradebook",
+            f"{base_url}/cid-{cid}/gradebook",
+        ]
+        for url in gradebook_urls:
+            if self._safe_navigate(url, f"gradebook - {course_name}"):
+                navigated = True
+                logger.debug(f"Navigated to gradebook via: {url}")
+                break
 
-            for selector in assignments_selectors:
-                try:
-                    if selector.startswith("//"):
-                        elements = self.driver.find_elements(By.XPATH, selector)
-                    else:
-                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+        if not navigated:
+            logger.debug(f"WARNING: Could not access gradebook for {course_name}")
+            return assignments
 
-                    for element in elements:
-                        if element and element.is_displayed():
-                            href = element.get_attribute("href") or ""
-                            text = element.text.lower()
-                            # Make sure we're clicking Assignments, not Summary
-                            if "assignment" in href.lower() or "assignment" in text:
-                                element.click()
-                                assignments_view_clicked = True
-                                logger.debug("Clicked Assignments sub-tab")
-                                self._wait_for_page_ready()
-                                break
-                    if assignments_view_clicked:
-                        break
-                except (NoSuchElementException, StaleElementReferenceException, TimeoutException):
-                    continue
-        except Exception as e:
-            logger.debug(f">>> Note: Could not click Assignments sub-tab: {e}")
-
-        # Final URL check
         logger.debug(f">>> ACTUAL URL: {self.driver.current_url}")
-
-        # SAVE DEBUG HTML
         self._save_debug_html(f"grades_assignments_{course_name}")
 
-        # Now parse the Grades → Assignments grid
         try:
             assignments = self._parse_grades_assignments_grid(course_name, cid)
         except Exception as e:
@@ -1678,22 +1871,48 @@ class LearningSuiteScraper:
             url_suffix = item.get("url")
             assignment_id = item.get("id")
 
-            if assignment_type in ("exam", "quiz"):
-                # Exams and quizzes use the exam info URL (no session segment — it expires)
-                if assignment_id:
-                    assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/exam/info/id-{assignment_id}"
-                elif url_suffix:
-                    assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/exam/info/id-{url_suffix}"
-            else:
-                # Regular assignments
-                if url_suffix:
-                    assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/assignment/{url_suffix}"
-                elif assignment_id:
-                    assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/assignment/{assignment_id}"
+            # url_suffix from LS JS data can be:
+            #   (a) a bare hash/id like "BnXO2Pk"
+            #   (b) a full relative path like "/cid-abc/student/assignment/BnXO2Pk"
+            #   (c) a full https URL
+            # Normalise to a bare suffix so URL construction below is consistent.
+            if url_suffix:
+                url_suffix_str = str(url_suffix).strip()
+                if url_suffix_str.startswith("http"):
+                    # Already absolute — sanitize it to remove session segment
+                    assignment_url = self._sanitize_url(url_suffix_str, cid=cid)
+                    url_suffix = None  # prevent further construction below
+                elif url_suffix_str.startswith("/"):
+                    # Relative path — strip leading path components, keep last segment
+                    parts = [p for p in url_suffix_str.split("/") if p]
+                    url_suffix = parts[-1] if parts else url_suffix_str
+                # else: bare id — use as-is
+
+            if not assignment_url:
+                if assignment_type in ("exam", "quiz"):
+                    # Exams and quizzes use the exam info URL (no session segment — it expires)
+                    if assignment_id:
+                        assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/exam/info/id-{assignment_id}"
+                    elif url_suffix:
+                        assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/exam/info/id-{url_suffix}"
+                else:
+                    # Regular assignments
+                    if url_suffix:
+                        assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/assignment/{url_suffix}"
+                    elif assignment_id:
+                        assignment_url = f"{self.LEARNING_SUITE_URL}/cid-{cid}/student/assignment/{assignment_id}"
 
             # Extract and clean description (remove HTML tags and entities)
             description = item.get("description", "") or item.get("instructions", "") or ""
             description = self._clean_description(description)
+
+            # Detect extra credit — LS uses various field names across versions
+            is_extra_credit = bool(
+                item.get("extraCredit")
+                or item.get("extra_credit")
+                or item.get("isExtraCredit")
+                or item.get("is_extra_credit")
+            )
 
             # Extract point value — LS uses various field names
             point_value = None
@@ -1718,6 +1937,7 @@ class LearningSuiteScraper:
                 "button_text": button_text,
                 "ls_cid": cid,
                 "point_value": point_value,
+                "is_extra_credit": is_extra_credit,
             }
 
         except Exception as e:
@@ -2236,17 +2456,32 @@ class LearningSuiteScraper:
         course_name = course["name"]
 
         base_url = self._get_base_url()
-        exams_url = f"{base_url}/cid-{cid}/student/exam"
 
-        # DETAILED LOGGING - Course being scraped
-        logger.debug("\n" + "=" * 70)
-        logger.debug(f">>> SCRAPING EXAMS TAB")
-        logger.debug(f">>> COURSE: {course_name}")
-        logger.debug(f">>> CID: {cid}")
-        logger.debug(f">>> URL: {exams_url}")
-        logger.debug("=" * 70)
+        logger.debug(f">>> SCRAPING EXAMS TAB: {course_name} (cid: {cid})")
 
-        # Try multiple URL patterns for exams
+        # ── HTTP FAST PATH ──────────────────────────────────────────────────────
+        exam_paths = [
+            f"/cid-{cid}/student/exam",
+            f"/cid-{cid}/student/exams",
+            f"/cid-{cid}/student/quizzes",
+        ]
+        for path in exam_paths:
+            for fetch_url in [f"{base_url}{path}", f"{self.LEARNING_SUITE_URL}{path}"]:
+                html_text = self._http_get(fetch_url)
+                if html_text:
+                    js_assignments = self._extract_js_assignments(html_text, course_name, cid)
+                    if js_assignments:
+                        logger.info(f"[HTTP] {course_name} exams: {len(js_assignments)} items")
+                        return js_assignments
+                    break
+
+        logger.debug(f"HTTP fast path: no embedded exam JS for {course_name}, using Selenium")
+
+        # ── SELENIUM FALLBACK ───────────────────────────────────────────────────
+        if not self.driver:
+            logger.debug(f"HTTP-only mode: no exam JS for {course_name}, skipping Selenium fallback")
+            return assignments
+
         exams_urls = [
             f"{base_url}/cid-{cid}/student/exam",
             f"{base_url}/cid-{cid}/student/exams",
@@ -3025,8 +3260,10 @@ class LearningSuiteScraper:
                 self._last_session_check = time.time()
 
             # KEEP-ALIVE: Touch the base URL periodically to refresh session timer
-            # Do this every 5 courses to stay well within session timeout
-            if i > 0 and i % 5 == 0:
+            # Every 3 courses keeps us well within the session timeout window,
+            # especially on larger schedules (8+ courses) where the scrape can run
+            # for several minutes.
+            if i > 0 and i % 3 == 0:
                 self._keepalive()
 
             # PRIMARY SOURCE: Grades -> Assignments view
@@ -3058,19 +3295,22 @@ class LearningSuiteScraper:
                             progress_callback(i + 1, total_courses, f"{course['name']} (failed)")
                         continue
 
-            # SECONDARY: If Grades view returned very few items, also try Exams tab
-            # This catches cases where exams are listed separately
-            if len(grades_assignments) < 5:
-                logger.debug(f">>> Grades view found only {len(grades_assignments)} items, checking Exams tab...")
-                try:
-                    exams_assignments = self.scrape_exams_tab(course)
-                    for exam in exams_assignments:
-                        if exam["title"] not in existing_titles:
-                            course_assignments.append(exam)
-                            existing_titles.add(exam["title"])
-                            logger.debug(f"    [NEW FROM EXAMS] {exam['title']}")
-                except Exception as e:
-                    logger.error(f"Error scraping exams tab for {course['name']}: {e}")
+            # SECONDARY: Always scrape the Exams tab — exams are kept in a separate
+            # section from gradeable assignments and are routinely missed if we only
+            # look at the Grades view.  Deduplicate by title so nothing appears twice.
+            try:
+                exams_assignments = self.scrape_exams_tab(course)
+                new_exams = 0
+                for exam in exams_assignments:
+                    if exam["title"] not in existing_titles:
+                        course_assignments.append(exam)
+                        existing_titles.add(exam["title"])
+                        new_exams += 1
+                        logger.debug(f"    [NEW FROM EXAMS] {exam['title']}")
+                if new_exams:
+                    logger.info(f"Exams tab added {new_exams} item(s) for {course['name']}")
+            except Exception as e:
+                logger.error(f"Error scraping exams tab for {course['name']}: {e}")
 
             # Track course total
             course_totals[course['name']] = len(course_assignments)
@@ -3113,15 +3353,14 @@ class LearningSuiteScraper:
                             course_assignments.append(a)
                             existing_titles.add(a["title"])
 
-                        if len(grades_assignments) < 5:
-                            try:
-                                exams_assignments = self.scrape_exams_tab(course)
-                                for exam in exams_assignments:
-                                    if exam["title"] not in existing_titles:
-                                        course_assignments.append(exam)
-                                        existing_titles.add(exam["title"])
-                            except Exception:
-                                pass
+                        try:
+                            exams_assignments = self.scrape_exams_tab(course)
+                            for exam in exams_assignments:
+                                if exam["title"] not in existing_titles:
+                                    course_assignments.append(exam)
+                                    existing_titles.add(exam["title"])
+                        except Exception:
+                            pass
 
                         course_totals[course['name']] = len(course_assignments)
                         logger.debug(f">>> RETRY COMPLETE: {course['name']} - {len(course_assignments)} assignments")
@@ -3204,12 +3443,15 @@ class LearningSuiteScraper:
                 if raw_link != sanitized_link:
                     logger.debug(f"    Link (sanitized): {sanitized_link}")
 
-                # Check if assignment exists (match by title + course_name)
-                existing = self.supabase.table("assignments").select("*").eq(
+                # Check if assignment exists (match by title + course_name + user_id)
+                query = self.supabase.table("assignments").select("*").eq(
                     "title", assignment["title"]
                 ).eq(
                     "course_name", assignment["course_name"]
-                ).execute()
+                )
+                if self.user_id:
+                    query = query.eq("user_id", self.user_id)
+                existing = query.execute()
 
                 if existing.data:
                     # Update existing assignment
@@ -3233,9 +3475,13 @@ class LearningSuiteScraper:
                         "ls_cid": assignment.get("ls_cid"),
                     }
 
-                    # Update point_value if newly available
-                    if assignment.get("point_value") is not None and existing_record.get("point_value") is None:
+                    # Always update point_value when scraper has it — professor may change it
+                    if assignment.get("point_value") is not None:
                         update_data["point_value"] = assignment["point_value"]
+
+                    # Always sync extra credit flag
+                    if "is_extra_credit" in assignment:
+                        update_data["is_extra_credit"] = assignment["is_extra_credit"]
 
                     # Only update status if Learning Suite shows a definitive change
                     # (e.g., submitted when it was previously not_started)
@@ -3267,10 +3513,15 @@ class LearningSuiteScraper:
                     elif ls_status == "unavailable" and current_status in ("newly_assigned", "not_started"):
                         update_data["status"] = "unavailable"
 
-                    # Update due date and description if scraped data changed
+                    # Update due date when scraper has a new value
                     if scraped_data_changed and assignment.get("due_date"):
                         update_data["due_date"] = assignment["due_date"]
-                        update_data["description"] = assignment.get("description")
+
+                    # Always update description from latest scrape — descriptions can be
+                    # added or edited by professors at any time, and the first sync often
+                    # returns None while subsequent syncs return the real content.
+                    if assignment.get("description") is not None:
+                        update_data["description"] = assignment["description"]
 
                     self.supabase.table("assignments").update(update_data).eq(
                         "id", existing_record["id"]
@@ -3296,13 +3547,17 @@ class LearningSuiteScraper:
                         "description": assignment.get("description"),
                         "link": assignment.get("link"),
                         "status": insert_status,
+                        "source": "learning_suite",
                         "is_modified": False,
                         "last_scraped_at": now,
                         "learning_suite_url": assignment.get("link"),
                         "assignment_type": assignment.get("assignment_type"),
                         "ls_cid": assignment.get("ls_cid"),
                         "point_value": assignment.get("point_value"),
+                        "is_extra_credit": assignment.get("is_extra_credit", False),
                     }
+                    if self.user_id:
+                        new_record["user_id"] = self.user_id
 
                     logger.debug(f"    [DB] INSERTING NEW RECORD:")
                     logger.debug(f"         Title: '{new_record['title']}'")

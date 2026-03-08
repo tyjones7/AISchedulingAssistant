@@ -32,17 +32,17 @@ npm run preview  # Preview production build
 ## Architecture
 
 ```
-BYU Learning Suite → LearningSuiteScraper (Selenium) ──┐
-Canvas LMS API ─────────────────────────────────────────┼→ Supabase PostgreSQL
-                                                        │        ↓
-React Frontend (Dashboard) ← FastAPI Backend ←──────────┘
+BYU Learning Suite → HTTP requests (cookies) ──┐
+Canvas LMS API (REST) ──────────────────────────┼→ Supabase PostgreSQL
+                                                │        ↓
+React Frontend (Dashboard) ← FastAPI Backend ←──┘
                                    ↕
                               Groq AI API
 ```
 
 ### Backend (`/backend`)
 - `main.py` - FastAPI app. Key route groups:
-  - Assignments: `GET /assignments`, `GET /assignments/stats/summary`, `PATCH /assignments/{id}`
+  - Assignments: `GET /assignments`, `GET /assignments/stats/summary`, `PATCH /assignments/{id}`, `POST /assignments/dismiss-overdue`
   - Sync: `POST /sync/start`, `GET /sync/status/{task_id}`, `GET /sync/last`
   - Auth: `POST /auth/browser-login`, `GET /auth/status`, `POST /auth/logout`
   - AI: `GET /ai/suggestions`, `POST /ai/suggestions/generate`, `POST /ai/briefing/generate`, `POST /ai/chat` (SSE streaming), `POST /ai/apply-plan`
@@ -54,7 +54,7 @@ React Frontend (Dashboard) ← FastAPI Backend ←──────────
   - `chat_stream(messages, assignments, prefs)` - streaming SSE chat, yields delta strings
   - `extract_plan(messages, assignments)` - structured plan extraction from conversation
   - All functions accept optional `prefs` dict and inject student profile into prompts
-- `scraper/learning_suite_scraper.py` - Selenium scraper for BYU Learning Suite with CAS auth and Duo MFA support (5-minute browser login timeout). Extracts `description`, `point_value`, `assignment_type` from embedded JS JSON.
+- `scraper/learning_suite_scraper.py` - LS scraper. **Login** uses Selenium with a persistent Chrome profile (`~/.campusai_chrome_profile`) — opens a visible window for the user to log in once. **Sync** uses HTTP-only mode: `init_http_only(cookies, base_url)` builds a `requests.Session` from stored cookies and fetches all gradebook pages directly (~0.3s/course, no browser). Extracts `description`, `point_value`, `assignment_type`, `is_extra_credit` from embedded JS (`var assignments = [...]`).
 - `sync_service.py` - Background sync orchestrator with thread-safe status tracking
 - `auth_store.py` - Singleton store for the authenticated Selenium scraper session
 - `canvas_auth_store.py` - Canvas API token store
@@ -82,6 +82,7 @@ Table: `assignments`
 - `estimated_minutes`, `planned_start`, `planned_end`, `notes`
 - `source` (`learning_suite` | `canvas`), `canvas_id`
 - `point_value` — points possible, scraped from Learning Suite
+- `is_extra_credit` — BOOLEAN DEFAULT FALSE (migration 010)
 
 Valid status values: `newly_assigned`, `not_started`, `in_progress`, `submitted`, `unavailable`
 
@@ -97,7 +98,7 @@ Table: `user_preferences` (single row)
 Table: `push_subscriptions`
 - `id`, `endpoint`, `p256dh`, `auth`, `created_at`
 
-Migrations: `/backend/migrations/` (001–009)
+Migrations: `/backend/migrations/` (001–010)
 
 ## Environment Variables
 
@@ -147,6 +148,8 @@ All AI calls receive a `prefs` dict from `_fetch_user_preferences()`. The `_buil
 - All scraped dates are localized to `America/Denver` (Mountain Time) via `zoneinfo.ZoneInfo`
 - All internal timestamps use `datetime.now(timezone.utc)`
 - During sync, Dashboard polls `GET /assignments` every 5 seconds for real-time updates
-- Authentication: backend opens a visible Chrome window, user logs in to BYU CAS + Duo, authenticated Selenium session is reused for scraping
+- Authentication: backend opens a visible Chrome window (`~/.campusai_chrome_profile`) — no automation banner, Duo fingerprint works. After login, cookies are stored in `auth_store`. All syncs thereafter use HTTP-only mode (no browser window).
+- Sync flow: `sync_service._run_sync()` calls `scraper.init_http_only(cookies, base_url)` — builds `requests.Session` from stored cookies, no Chrome started. `get_courses()` uses `_get_courses_http()` (BeautifulSoup), `scrape_grades_assignments_view()` and `scrape_exams_tab()` use HTTP fast path; if no embedded JS found they skip (no Selenium fallback).
+- Stale sync guard: if `_current_task_id` is >10 minutes old it's force-expired so a new sync can start
 - Pre-existing ESLint warning in `App.jsx` (variable used before declaration) — not a bug, React hoists function declarations
 - Chat conversation is persisted in localStorage under `campus-ai-chat`; daily briefing date tracked under `campus-ai-briefing-date`; proactive plan dismissal under `campus-ai-plan-dismissed`

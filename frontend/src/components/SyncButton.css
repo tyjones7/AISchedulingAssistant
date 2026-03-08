@@ -60,6 +60,13 @@
   text-align: right;
 }
 
+.sync-warning-text {
+  font-size: var(--text-xs);
+  color: #f59e0b;
+  max-width: 200px;
+  text-align: right;
+}
+
 /* Sync Button */
 .sync-btn {
   display: inline-flex;

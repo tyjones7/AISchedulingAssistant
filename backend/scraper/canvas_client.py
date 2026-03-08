@@ -103,6 +103,9 @@ class CanvasClient:
                 except (ValueError, TypeError):
                     pass
 
+            # Canvas marks extra credit as omit_from_final_grade
+            is_extra_credit = bool(a.get("omit_from_final_grade"))
+
             assignments.append({
                 "title": a.get("name", "Untitled"),
                 "course_name": course_name,
@@ -113,6 +116,7 @@ class CanvasClient:
                 "source": "canvas",
                 "canvas_id": a.get("id"),
                 "assignment_type": a.get("submission_types", ["unknown"])[0] if a.get("submission_types") else "unknown",
+                "is_extra_credit": is_extra_credit,
             })
 
         return assignments
@@ -125,7 +129,12 @@ class CanvasClient:
         submission = assignment.get("submission") or {}
         workflow = submission.get("workflow_state", "")
 
-        if workflow in ("submitted", "graded"):
+        # Any of these mean the student has turned something in
+        if workflow in ("submitted", "graded", "pending_review", "resubmitted"):
+            return "submitted"
+
+        # Canvas marks late submissions separately — still counts as submitted
+        if submission.get("late") and workflow not in ("unsubmitted", ""):
             return "submitted"
 
         return "not_started"
@@ -161,12 +170,13 @@ class CanvasClient:
         logger.info(f"Canvas: total {len(all_assignments)} assignments from {len(courses)} courses")
         return all_assignments
 
-    def update_database(self, assignments: list[dict], supabase_client=None) -> dict:
+    def update_database(self, assignments: list[dict], supabase_client=None, user_id: str = None) -> dict:
         """Upsert Canvas assignments into Supabase by canvas_id.
 
         Args:
             assignments: List of assignment dicts from scrape_all_courses()
-            supabase_client: Optional Supabase client to reuse
+            supabase_client: Optional Supabase client to reuse (prefer service-role client)
+            user_id: The authenticated user's ID. All rows are written with this user_id.
 
         Returns:
             Dict with counts: {"new": N, "modified": N, "unchanged": N, "errors": N}
@@ -175,7 +185,7 @@ class CanvasClient:
             supabase = supabase_client
         else:
             url = os.getenv("SUPABASE_URL")
-            key = os.getenv("SUPABASE_KEY")
+            key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
             if not url or not key:
                 logger.error("Canvas: missing Supabase credentials")
                 return {"new": 0, "modified": 0, "unchanged": 0, "errors": len(assignments)}
@@ -190,10 +200,11 @@ class CanvasClient:
                 continue
 
             try:
-                # Check if assignment already exists
-                existing = supabase.table("assignments").select("*").eq(
-                    "canvas_id", canvas_id
-                ).execute()
+                # Check if assignment already exists for this user
+                query = supabase.table("assignments").select("*").eq("canvas_id", canvas_id)
+                if user_id:
+                    query = query.eq("user_id", user_id)
+                existing = query.execute()
 
                 row = {
                     "title": a["title"],
@@ -205,7 +216,10 @@ class CanvasClient:
                     "canvas_id": canvas_id,
                     "assignment_type": a.get("assignment_type"),
                     "last_scraped_at": now_iso,
+                    "is_extra_credit": a.get("is_extra_credit", False),
                 }
+                if user_id:
+                    row["user_id"] = user_id
 
                 if existing.data:
                     # Update existing — but don't overwrite user-modified status
@@ -219,6 +233,7 @@ class CanvasClient:
                             "description": row["description"],
                             "link": row["link"],
                             "last_scraped_at": now_iso,
+                            "is_extra_credit": row["is_extra_credit"],
                         }
                     else:
                         update_data = {**row, "status": a["status"]}

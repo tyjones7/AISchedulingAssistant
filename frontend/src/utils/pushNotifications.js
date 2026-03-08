@@ -1,4 +1,4 @@
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
 
@@ -40,9 +40,8 @@ export async function registerPushNotifications() {
 
     // Send subscription to backend
     const subJson = subscription.toJSON()
-    const res = await fetch(`${API_BASE}/push/subscribe`, {
+    const res = await authFetch(`${API_BASE}/push/subscribe`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }),
     })
 
@@ -66,9 +65,8 @@ export async function unregisterPushNotifications() {
     if (!subscription) return
 
     const subJson = subscription.toJSON()
-    await fetch(`${API_BASE}/push/subscribe`, {
+    await authFetch(`${API_BASE}/push/subscribe`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }),
     })
     await subscription.unsubscribe()

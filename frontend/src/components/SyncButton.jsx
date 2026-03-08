@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 import './SyncButton.css'
 
 const POLL_INTERVAL = 3000
@@ -21,6 +21,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
   const [status, setStatus] = useState(null)
   const [lastSync, setLastSync] = useState(null)
   const [error, setError] = useState(null)
+  const [warning, setWarning] = useState(null)
 
   useEffect(() => {
     fetchLastSync()
@@ -42,7 +43,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
     const pollStatus = async () => {
       const url = `${API_BASE}/sync/status/${taskId}`
       try {
-        const response = await fetch(url)
+        const response = await authFetch(url)
 
         if (!response.ok) {
           let errorDetail = `HTTP ${response.status}`
@@ -79,6 +80,13 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
           setSyncing(false)
           setTaskId(null)
           fetchLastSync()
+          if (data.warnings && data.warnings.length > 0) {
+            let warningText = data.warnings.join(' ')
+            if (/session expired|reconnect/i.test(warningText)) {
+              warningText += ' → Go to Settings to reconnect.'
+            }
+            setWarning(warningText)
+          }
           if (onSyncComplete) {
             onSyncComplete(data)
           }
@@ -112,7 +120,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
 
   const fetchLastSync = async () => {
     try {
-      const response = await fetch(`${API_BASE}/sync/last`)
+      const response = await authFetch(`${API_BASE}/sync/last`)
       if (!response.ok) return
       const data = await response.json()
       if (data.last_sync) {
@@ -127,6 +135,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
     if (syncing) return
 
     setError(null)
+    setWarning(null)
     setSyncing(true)
     setStatus({ status: 'pending', message: 'Starting sync...' })
 
@@ -135,9 +144,8 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
     }
 
     try {
-      const response = await fetch(`${API_BASE}/sync/start`, {
+      const response = await authFetch(`${API_BASE}/sync/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
       })
 
       if (!response.ok) {
@@ -148,6 +156,11 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
           errorMessage = data.detail || errorMessage
         } catch {
           // Response wasn't JSON
+        }
+        // 409 = sync already in progress — wait a moment and the backend will
+        // auto-expire it if it's stuck (>10 min). Show a clearer message.
+        if (response.status === 409) {
+          errorMessage = 'A sync is already running. Wait for it to finish, or restart the backend if it appears stuck.'
         }
         throw new Error(errorMessage)
       }
@@ -220,7 +233,11 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
           <span className="sync-error-text">{error}</span>
         )}
 
-        {!syncing && !error && lastSync && (
+        {warning && !syncing && !error && (
+          <span className="sync-warning-text">{warning}</span>
+        )}
+
+        {!syncing && !error && !warning && lastSync && (
           <>
             {lastSync.last_sync_status === 'failed' ? (
               <span className="sync-error-text">Last sync failed</span>

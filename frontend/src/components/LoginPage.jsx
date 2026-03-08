@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 import './LoginPage.css'
 
 const POLL_INTERVAL = 2000
@@ -24,7 +24,7 @@ function LoginPage({ onLoginSuccess }) {
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const resp = await fetch(`${API_BASE}/auth/status`)
+        const resp = await authFetch(`${API_BASE}/auth/status`)
         if (resp.ok) {
           const data = await resp.json()
           if (data.authenticated) setLsConnected(true)
@@ -32,7 +32,7 @@ function LoginPage({ onLoginSuccess }) {
             setCanvasConnected(true)
             // Fetch Canvas user name
             try {
-              const canvasResp = await fetch(`${API_BASE}/auth/canvas-status`)
+              const canvasResp = await authFetch(`${API_BASE}/auth/canvas-status`)
               if (canvasResp.ok) {
                 const canvasData = await canvasResp.json()
                 if (canvasData.user_name) setCanvasUser(canvasData.user_name)
@@ -55,7 +55,7 @@ function LoginPage({ onLoginSuccess }) {
 
     const pollStatus = async () => {
       try {
-        const response = await fetch(`${API_BASE}/auth/browser-status/${taskId}`)
+        const response = await authFetch(`${API_BASE}/auth/browser-status/${taskId}`)
         if (!response.ok) {
           throw new Error('Failed to check login status')
         }
@@ -90,7 +90,7 @@ function LoginPage({ onLoginSuccess }) {
     setStatus('opening')
 
     try {
-      const response = await fetch(`${API_BASE}/auth/browser-login`, {
+      const response = await authFetch(`${API_BASE}/auth/browser-login`, {
         method: 'POST',
       })
 
@@ -117,9 +117,8 @@ function LoginPage({ onLoginSuccess }) {
     setCanvasError(null)
 
     try {
-      const response = await fetch(`${API_BASE}/auth/canvas-token`, {
+      const response = await authFetch(`${API_BASE}/auth/canvas-token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
       })
 

@@ -182,6 +182,18 @@
   color: var(--color-status-muted);
 }
 
+/* Extra credit badge */
+.ec-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
 /* Source badge */
 .source-badge {
   font-size: 10px;

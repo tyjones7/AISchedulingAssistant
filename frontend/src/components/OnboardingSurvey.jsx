@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 import './OnboardingSurvey.css'
 
 const STEPS = [
@@ -52,11 +52,33 @@ const STEPS = [
   },
 ]
 
+// step -1 = welcome screen, 0..4 = survey questions
 export default function OnboardingSurvey({ onComplete }) {
-  const [step, setStep] = useState(0)
+  const [step, setStep] = useState(-1)
   const [answers, setAnswers] = useState({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+
+  // Welcome screen
+  if (step === -1) {
+    return (
+      <div className="survey-backdrop">
+        <div className="survey-card survey-welcome-card">
+          <div className="survey-welcome-logo">C</div>
+          <h1 className="survey-welcome-title">Welcome to CampusAI</h1>
+          <p className="survey-welcome-sub">
+            CampusAI pulls your BYU assignments and builds you a personalized study schedule — so you&apos;re never caught off guard.
+          </p>
+          <button className="survey-next survey-welcome-btn" onClick={() => setStep(0)}>
+            Get started
+          </button>
+          <button className="survey-skip" onClick={() => onComplete(null)}>
+            Skip for now
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const current = STEPS[step]
   const selected = answers[current.id]
@@ -75,9 +97,8 @@ export default function OnboardingSurvey({ onComplete }) {
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/preferences`, {
+      const res = await authFetch(`${API_BASE}/preferences`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(answers),
       })
       if (!res.ok) throw new Error('Failed to save')
@@ -129,11 +150,9 @@ export default function OnboardingSurvey({ onComplete }) {
         </div>
 
         <div className="survey-footer">
-          {step > 0 && (
-            <button className="survey-back" onClick={() => setStep((s) => s - 1)}>
-              Back
-            </button>
-          )}
+          <button className="survey-back" onClick={() => step === 0 ? setStep(-1) : setStep((s) => s - 1)}>
+            Back
+          </button>
           <button className="survey-skip" onClick={skip}>
             Skip for now
           </button>

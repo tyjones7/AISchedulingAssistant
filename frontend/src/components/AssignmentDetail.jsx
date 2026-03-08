@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 import { downloadICS, getGoogleCalendarUrl } from '../utils/calendar'
 import './AssignmentDetail.css'
 
@@ -88,11 +88,10 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
         notes: notes || '',
       }
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API_BASE}/assignments/${assignment.id}`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updateData),
         }
       )

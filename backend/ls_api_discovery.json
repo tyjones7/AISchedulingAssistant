@@ -1,0 +1,450 @@
+{
+  "summary": {
+    "total_requests": 49,
+    "api_requests": 0
+  },
+  "api_requests": [],
+  "all_requests": [
+    {
+      "requestId": "59473.4",
+      "url": "https://learningsuite.byu.edu/css/tailwind-vue.css?v=40",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.3",
+      "url": "https://learningsuite.byu.edu/css/fontawesome6.css?v=40",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.5",
+      "url": "https://learningsuite.byu.edu/images/LS-loading-logo.svg",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.6",
+      "url": "https://learningsuite.byu.edu/images/LS-loading-text.png",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/png",
+      "responseBody": null
+    },
+    {
+      "requestId": "3E055903C2BFB1BDCB42A0D3C745CA58",
+      "url": "https://learningsuite.byu.edu/",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/html",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.2",
+      "url": "https://learningsuite.byu.edu/ruxitagentjs_ICA15789NPRTUVXfqrux_10331260218130851.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.26",
+      "url": "https://learningsuite.byu.edu/images/LS-loading-background.svg",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.35",
+      "url": "https://learningsuite.byu.edu/ruxitagentjs_ICA15789NPRTUVXfqrux_10331260218130851.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.38",
+      "url": "https://learningsuite.byu.edu/css/tailwind-vue.css?v=40fd",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.37",
+      "url": "https://learningsuite.byu.edu/css/fontawesome6.css?v=40fd",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.40",
+      "url": "https://learningsuite.byu.edu/main.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "8BC257AA969330CDA278544DB2FBC4D3",
+      "url": "https://learningsuite.byu.edu/.iHfH/cid-hyJ_vrOhPXh7/student/home",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/html",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.39",
+      "url": "https://learningsuite.byu.edu/js/libs/require/2.3.6/require.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.42",
+      "url": "https://learningsuite.byu.edu/plugins/MathJax/MathJax.js?config=TeX-AMS-MML_HTMLorMML&lsv=2.7.5",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.43",
+      "url": "https://learningsuite.byu.edu/app/drivers/student/dashboard/drivervue-build.js?v=40mV",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.41",
+      "url": "https://learningsuite.byu.edu/app/components/components-build.js?v=40mV",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.69",
+      "url": "https://learningsuite.byu.edu/images/byu_logo.svg",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.70",
+      "url": "https://learningsuite.byu.edu/images/ls_logo.svg",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.52",
+      "url": "https://learningsuite.byu.edu/plugins/MathJax/config/TeX-AMS-MML_HTMLorMML.js?V=2.7.5",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.61",
+      "url": "https://learningsuite.byu.edu/font/metropolis/Metropolis-Medium.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.57",
+      "url": "https://learningsuite.byu.edu/font/metropolis/Metropolis-Light.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.55",
+      "url": "https://learningsuite.byu.edu/font/fontawesome6/fa-light-300.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.53",
+      "url": "https://learningsuite.byu.edu/font/fontawesome6/fa-solid-900.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.80",
+      "url": "https://learningsuite.byu.edu/ruxitagentjs_ICA15789NPRTUVXfqrux_10331260218130851.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.82",
+      "url": "https://learningsuite.byu.edu/css/fontawesome6.css?v=40fd",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.83",
+      "url": "https://learningsuite.byu.edu/css/tailwind-vue.css?v=40fd",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.84",
+      "url": "https://learningsuite.byu.edu/js/libs/require/2.3.6/require.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.85",
+      "url": "https://learningsuite.byu.edu/main.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.86",
+      "url": "https://learningsuite.byu.edu/app/components/components-build.js?v=40mV",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.87",
+      "url": "https://learningsuite.byu.edu/plugins/MathJax/MathJax.js?config=TeX-AMS-MML_HTMLorMML&lsv=2.7.5",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.90",
+      "url": "https://learningsuite.byu.edu/ruxitagentjs_ICA15789NPRTUVXfqrux_10331260218130851.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/javascript",
+      "responseBody": "/*\n Copyright and licenses see https://www.dynatrace.com/company/trust-center/customers/reports/ */\n(function(){function Xa(){var Aa;(Aa=void 0===Ya.dialogArguments&&navigator.cookieEnabled)||(document.cookie=\"__dTCookie=1;SameSite=Lax\",Aa=document.cookie.includes(\"__dTCookie\"),Aa=(document.cookie=\"__dTCookie=1; expires=Thu, 01-Jan-1970 00:00:01 GMT\",Aa));return Aa}function Ia(){if(Xa()){var Aa=Ya.dT_,bb=null==Aa?void 0:Aa.platformPrefix,Ua;if(Ua=!Aa||bb){var Da;Ua=(null===(Da=document.currentScript)||void 0===Da?void 0:Da.getAttribute(\"data-dtconfig\"))||\"#CONFIGSTRING#|auto=#AUTO#|domain=#DOMAIN#|rid=RID_#REQUEST_ID#|rpid=#RESPONSE_ID#\";\nUa=(Da=null==Aa?void 0:Aa.minAgentVersion)&&\"10331260218130851\"<`${Da}`?(console.log(\"[CookiePrefix/initConfig] Min agent version detected, and javascript agent is older - the javascript agent will not be initialized!\"),!1):bb&&!Ua.includes(`cuc=${bb}`)?(console.log(`[CookiePrefix/initConfig] value of platformPrefix [${bb}] does not match the \"cuc\" value in the current config - initConfig will not initialize!`),!1):!0}Ua&&(Aa={cfg:\"#CONFIGSTRING#|auto=#AUTO#|domain=#DOMAIN#|rid=RID_#REQUEST_ID#|rpid=#RESPONSE_ID#\",\niCE:Xa,platformCookieOffset:null==Aa?void 0:Aa.platformCookieOffset},bb&&(Aa.platformPrefix=bb),Ya.dT_=Aa)}}function Ta(Aa){return\"function\"==typeof Aa}function db(){let Aa=window.performance;return Aa&&Fa&&Pa&&!!Aa.timeOrigin&&Ta(Aa.now)&&Ta(Aa.getEntriesByType)&&Ta(Aa.getEntriesByName)&&Ta(Aa.setResourceTimingBufferSize)&&Ta(Aa.clearResourceTimings)}this.dT_&&dT_.prm&&dT_.prm();var Ya=\"undefined\"!=typeof globalThis?globalThis:\"undefined\"!=typeof window?window:void 0,Pa=\"function\"==typeof PerformanceResourceTiming||\n\"object\"==typeof PerformanceResourceTiming,Fa=\"function\"==typeof PerformanceNavigationTiming||\"object\"==typeof PerformanceNavigationTiming;if((!(\"documentMode\"in document)||Number.isNaN(document.documentMode))&&db()){let Aa=Ya.dT_;!Aa||!Aa.cfg&&Aa.platformPrefix?Ia():Aa.gCP||(Ya.console.log(\"Duplicate agent injection detected, turning off redundant initConfig.\"),Aa.di=1)}})();\n(function(){function Xa(){let f=0;try{f=Math.round(Ma.performance.timeOrigin)}catch(q){}if(0>=f||Number.isNaN(f)||!Number.isFinite(f))je.push({severity:\"Warning\",type:\"ptoi\",text:`performance.timeOrigin is invalid, with a value of [${f}]. Falling back to performance.timing.navigationStart`}),f=Le;return $d=f,jd=Ia,$d}function Ia(){return $d}function Ta(){return jd()}function db(){let f=0;try{f=Math.round(Ma.performance.now())}catch(q){}return 0>=f||Number.isNaN(f)||!Number.isFinite(f)?Date.now()-\njd():f}function Ya(f,q){if(!q)return\"\";var y=f+\"=\";f=q.indexOf(y);if(0>f)return\"\";for(;0<=f;){if(0===f||\" \"===q.charAt(f-1)||\";\"===q.charAt(f-1))return y=f+y.length,f=q.indexOf(\";\",f),0<=f?q.substring(y,f):q.substring(y);f=q.indexOf(y,f+y.length)}return\"\"}function Pa(f){return Ya(f,document.cookie)}function Fa(){}function Aa(f,q=[]){var y;if(!f||\"object\"!=typeof f&&\"function\"!=typeof f)return!1;let Q=\"number\"!=typeof q?q:[]"
+    },
+    {
+      "requestId": "59473.92",
+      "url": "https://learningsuite.byu.edu/css/fontawesome6.css?v=40fd",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": "/*!\n * Font Awesome Pro 6.6.0 by @fontawesome - https://fontawesome.com\n * License - https://fontawesome.com/license (Commercial License)\n * Copyright 2024 Fonticons, Inc.\n */.fa{font-family:var(--fa-style-family, \"Font Awesome 6 Pro\");font-weight:var(--fa-style, 900)}.fa-solid,.fa-regular,.fa-brands,.fas,.far,.fab,.fal,.fat,.fad,.fass,.fasr,.fasl,.fast,.fasds,.fa-light,.fa-thin,.fa-duotone,.fa-sharp,.fa-sharp-duotone,.fa-sharp-solid,.fa-classic,.fa{-moz-osx-font-smoothing:grayscale;-webkit-font-smoothing:antialiased;display:var(--fa-display, inline-block);font-style:normal;font-variant:normal;line-height:1;text-rendering:auto}.fas,.far,.fal,.fat,.fa-solid,.fa-regular,.fa-light,.fa-thin,.fa-classic{font-family:\"Font Awesome 6 Pro\"}.fab,.fa-brands{font-family:\"Font Awesome 6 Brands\"}.fad,.fa-classic.fa-duotone,.fa-duotone{font-family:\"Font Awesome 6 Duotone\"}.fasds,.fa-sharp-duotone{font-family:\"Font Awesome 6 Sharp Duotone\"}.fasds,.fa-sharp-duotone{font-weight:900}.fass,.fasr,.fasl,.fast,.fa-sharp{font-family:\"Font Awesome 6 Sharp\"}.fass,.fa-sharp{font-weight:900}.fa-1x{font-size:1em}.fa-2x{font-size:2em}.fa-3x{font-size:3em}.fa-4x{font-size:4em}.fa-5x{font-size:5em}.fa-6x{font-size:6em}.fa-7x{font-size:7em}.fa-8x{font-size:8em}.fa-9x{font-size:9em}.fa-10x{font-size:10em}.fa-2xs{font-size:.625em;line-height:.1em;vertical-align:.225em}.fa-xs{font-size:.75em;line-height:.0833333337em;vertical-align:.125em}.fa-sm{font-size:.875em;line-height:.0714285718em;vertical-align:.0535714295em}.fa-lg{font-size:1.25em;line-height:.05em;vertical-align:-.075em}.fa-xl{font-size:1.5em;line-height:.0416666682em;vertical-align:-0.125em}.fa-2xl{font-size:2em;line-height:.03125em;vertical-align:-0.1875em}.fa-fw{text-align:center;width:1.25em}.fa-ul{list-style-type:none;margin-left:var(--fa-li-margin, 2.5em);padding-left:0}.fa-ul>li{position:relative}.fa-li{left:calc(-1*var(--fa-li-width, 2em));position:absolute;text-align:center;width:var(--fa-li-width, 2em);line-height:inherit}.fa-border{border-color:var(--fa-border-color, #eee);border-radius:var(--fa-border-radius, 0.1em);border-style:var(--fa-border-style, solid);border-width:var(--fa-border-width, 0.08em);padding:var(--fa-border-padding, 0.2em 0.25em 0.15em)}.fa-pull-left{float:left;margin-right:var(--fa-pull-margin, 0.3em)}.fa-pull-right{float:right;margin-left:var(--fa-pull-margin, 0.3em)}.fa-beat{animation-name:fa-beat;animation-delay:var(--fa-animation-delay, 0s);animation-direction:var(--fa-animation-direction, normal);animation-duration:var(--fa-animation-duration, 1s);animation-iteration-count:var(--fa-animation-iteration-count, infinite);animation-timing-function:var(--fa-animation-timing, ease-in-out)}.fa-bounce{animation-name:fa-bounce;animation-delay:var(--fa-animation-delay, 0s);animation-direction:var(--fa-animation-direction, normal);animation-duration:var(--fa-animation-duration, 1s);animation-iteration-count:var(--fa-animation-iteration-count, infinite);animation-timing-function:var(--fa-animation-"
+    },
+    {
+      "requestId": "59473.93",
+      "url": "https://learningsuite.byu.edu/css/tailwind-vue.css?v=40fd",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/css",
+      "responseBody": "/*! tailwindcss v3.3.5 | MIT License | https://tailwindcss.com*/*,:after,:before{box-sizing:border-box;border-width:0;border-style:solid;border-color:var(--g2,#cccccb)}:after,:before{--tw-content:\"\"}html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;-o-tab-size:4;tab-size:4;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,Noto Sans,sans-serif,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol,Noto Color Emoji;font-feature-settings:normal;font-variation-settings:normal}body{margin:0;line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,pre,samp{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,Liberation Mono,Courier New,monospace;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:initial}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}[type=button],[type=reset],[type=submit],button{-webkit-appearance:button;background-color:initial;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:initial}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}fieldset{margin:0}fieldset,legend{padding:0}menu,ol,ul{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::-moz-placeholder,textarea::-moz-placeholder{opacity:1;color:#9ca3af}input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}[role=button],button{cursor:pointer}:disabled{cursor:default}audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]{display:none}*,::backdrop,:after,:before{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:#3b82f680;--t"
+    },
+    {
+      "requestId": "59473.94",
+      "url": "https://learningsuite.byu.edu/js/libs/require/2.3.6/require.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": "/** vim: et:ts=4:sw=4:sts=4\n * @license RequireJS 2.3.6 Copyright jQuery Foundation and other contributors.\n * Released under MIT license, https://github.com/requirejs/requirejs/blob/master/LICENSE\n */\nvar requirejs,require,define;!function(global,setTimeout){var req,s,head,baseElement,dataMain,src,interactiveScript,currentlyAddingScript,mainScript,subPath,version=\"2.3.6\",commentRegExp=/\\/\\*[\\s\\S]*?\\*\\/|([^:\"'=]|^)\\/\\/.*$/gm,cjsRequireRegExp=/[^.]\\s*require\\s*\\(\\s*[\"']([^'\"\\s]+)[\"']\\s*\\)/g,jsSuffixRegExp=/\\.js$/,currDirRegExp=/^\\.\\//,op=Object.prototype,ostring=op.toString,hasOwn=op.hasOwnProperty,isBrowser=!(\"undefined\"==typeof window||\"undefined\"==typeof navigator||!window.document),isWebWorker=!isBrowser&&\"undefined\"!=typeof importScripts,readyRegExp=isBrowser&&\"PLAYSTATION 3\"===navigator.platform?/^complete$/:/^(complete|loaded)$/,defContextName=\"_\",isOpera=\"undefined\"!=typeof opera&&\"[object Opera]\"===opera.toString(),contexts={},cfg={},globalDefQueue=[],useInteractive=!1;function commentReplace(e,t){return t||\"\"}function isFunction(e){return\"[object Function]\"===ostring.call(e)}function isArray(e){return\"[object Array]\"===ostring.call(e)}function each(e,t){var i;if(e)for(i=0;i<e.length&&(!e[i]||!t(e[i],i,e));i+=1);}function eachReverse(e,t){var i;if(e)for(i=e.length-1;-1<i&&(!e[i]||!t(e[i],i,e));i-=1);}function hasProp(e,t){return hasOwn.call(e,t)}function getOwn(e,t){return hasProp(e,t)&&e[t]}function eachProp(e,t){var i;for(i in e)if(hasProp(e,i)&&t(e[i],i))break}function mixin(i,e,r,n){return e&&eachProp(e,function(e,t){!r&&hasProp(i,t)||(!n||\"object\"!=typeof e||!e||isArray(e)||isFunction(e)||e instanceof RegExp?i[t]=e:(i[t]||(i[t]={}),mixin(i[t],e,r,n)))}),i}function bind(e,t){return function(){return t.apply(e,arguments)}}function scripts(){return document.getElementsByTagName(\"script\")}function defaultOnError(e){throw e}function getGlobal(e){if(!e)return e;var t=global;return each(e.split(\".\"),function(e){t=t[e]}),t}function makeError(e,t,i,r){var n=new Error(t+\"\\nhttps://requirejs.org/docs/errors.html#\"+e);return n.requireType=e,n.requireModules=r,i&&(n.originalError=i),n}if(void 0===define){if(void 0!==requirejs){if(isFunction(requirejs))return;cfg=requirejs,requirejs=void 0}void 0===require||isFunction(require)||(cfg=require,require=void 0),req=requirejs=function(e,t,i,r){var n,o,a=defContextName;return isArray(e)||\"string\"==typeof e||(o=e,isArray(t)?(e=t,t=i,i=r):e=[]),o&&o.context&&(a=o.context),(n=getOwn(contexts,a))||(n=contexts[a]=req.s.newContext(a)),o&&n.configure(o),n.require(e,t,i)},req.config=function(e){return req(e)},req.nextTick=void 0!==setTimeout?function(e){setTimeout(e,4)}:function(e){e()},require||(require=req),req.version=version,req.jsExtRegExp=/^\\/|:|\\?|\\.js$/,req.isBrowser=isBrowser,s=req.s={contexts:contexts,newContext:newContext},req({}),each([\"toUrl\",\"undef\",\"defined\",\"specified\"],function(t){req[t]=function(){var e=contexts[defContextName];return e.require[t].apply(e,arguments)}}),isBrowser&&(head=s.head=d"
+    },
+    {
+      "requestId": "59473.95",
+      "url": "https://learningsuite.byu.edu/main.js",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": "require.config({\n\tbaseUrl: \"\",\n\tpaths: {\n\t\t'core' : 'js/core',\n\t\t'libs' : 'js/libs',\n\t\t'underscore-clean': 'js/libs/underscore-module',\n\t\t'jquery': 'js/libs/jquery.min',\n\t\t'lsunderscore': 'js/libs/lsUnderscore',\n\t\t'backbone-noconflict': 'js/libs/backbone-module',\n\t\t'backbone-clean': 'js/libs/backbone-min',\n\t\t'backbone-with-validation' : 'js/libs/backboneWithValidation',\n\t\t'backbone': 'js/libs/lsbackbone',\n\t\t'handlebars-clean': 'js/libs/handlebars-module',\n\t\t'handlebars': 'js/libs/handlebars-withHelpers-module',\n\t\t'text': 'js/libs/text',\n\t\t'template': 'js/libs/template',\n\t\t'vuec' : 'js/libs/vue-loader',\n\t\t'vue' : 'js/libs/vue.runtime',\n\t\t'vuex' : 'js/libs/vuex',\n\t\t'vue-syncadapter' : 'js/libs/vue-syncadapter',\n\t\t'vue-componentcompiler': 'js/libs/vue-componentcompiler',\n\t\t'vue-util' : 'js/libs/vue-util',\n\t\t'postcss': 'js/libs/postcss'\n\t},\n\tpackages: [{\n\t\tname: 'moment',\n\t\tlocation: 'app/plugins/moment',\n\t\tmain: 'moment.min'\n\t}],\n\tmap: {\n\t\t'*' : { \n\t\t\t\t'backbone-clean' : 'backbone-noconflict',\n\t\t\t\t'underscore' : 'lsunderscore'\n\t\t\t},\n\t\t'backbone-noconflict' : { 'backbone-clean': 'backbone-clean' },\n\t\t'underscore' : {'lsunderscore' : 'lsunderscore'}\n\t}\n});\n"
+    },
+    {
+      "requestId": "59473.96",
+      "url": "https://learningsuite.byu.edu/app/components/components-build.js?v=40mV",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": "!function(M,b){\"object\"==typeof exports&&\"undefined\"!=typeof module?module.exports=b():\"function\"==typeof define&&define.amd?define(\"vue\",b):(M=M||self).Vue=b()}(this,function(){\"use strict\";var M=Object.freeze({});function b(M){return null==M}function z(M){return null!=M}function p(M){return!0===M}function o(M){return\"string\"==typeof M||\"number\"==typeof M||\"symbol\"==typeof M||\"boolean\"==typeof M}function e(M){return null!==M&&\"object\"==typeof M}var c=Object.prototype.toString;function O(M){return\"[object Object]\"===c.call(M)}function t(M){var b=parseFloat(String(M));return b>=0&&Math.floor(b)===b&&isFinite(M)}function n(M){return z(M)&&\"function\"==typeof M.then&&\"function\"==typeof M.catch}function a(M){return null==M?\"\":Array.isArray(M)||O(M)&&M.toString===c?JSON.stringify(M,null,2):String(M)}function i(M){var b=parseFloat(M);return isNaN(b)?M:b}function A(M,b){for(var z=Object.create(null),p=M.split(\",\"),o=0;o<p.length;o++)z[p[o]]=!0;return b?function(M){return z[M.toLowerCase()]}:function(M){return z[M]}}var r=A(\"key,ref,slot,slot-scope,is\");function d(M,b){if(M.length){var z=M.indexOf(b);if(z>-1)return M.splice(z,1)}}var q=Object.prototype.hasOwnProperty;function s(M,b){return q.call(M,b)}function u(M){var b=Object.create(null);return function(z){return b[z]||(b[z]=M(z))}}var l=/-(\\w)/g,W=u(function(M){return M.replace(l,function(M,b){return b?b.toUpperCase():\"\"})}),f=u(function(M){return M.charAt(0).toUpperCase()+M.slice(1)}),h=/\\B([A-Z])/g,R=u(function(M){return M.replace(h,\"-$1\").toLowerCase()}),m=Function.prototype.bind?function(M,b){return M.bind(b)}:function(M,b){function z(z){var p=arguments.length;return p?p>1?M.apply(b,arguments):M.call(b,z):M.call(b)}return z._length=M.length,z};function L(M,b){b=b||0;for(var z=M.length-b,p=new Array(z);z--;)p[z]=M[z+b];return p}function g(M,b){for(var z in b)M[z]=b[z];return M}function N(M){for(var b={},z=0;z<M.length;z++)M[z]&&g(b,M[z]);return b}function v(M,b,z){}var B=function(M,b,z){return!1},y=function(M){return M};function X(M,b){if(M===b)return!0;var z=e(M),p=e(b);if(!z||!p)return!z&&!p&&String(M)===String(b);try{var o=Array.isArray(M),c=Array.isArray(b);if(o&&c)return M.length===b.length&&M.every(function(M,z){return X(M,b[z])});if(M instanceof Date&&b instanceof Date)return M.getTime()===b.getTime();if(o||c)return!1;var O=Object.keys(M),t=Object.keys(b);return O.length===t.length&&O.every(function(z){return X(M[z],b[z])})}catch(M){return!1}}function T(M,b){for(var z=0;z<M.length;z++)if(X(M[z],b))return z;return-1}function _(M){var b=!1;return function(){b||(b=!0,M.apply(this,arguments))}}var w=\"data-server-rendered\",S=[\"component\",\"directive\",\"filter\"],x=[\"beforeCreate\",\"created\",\"beforeMount\",\"mounted\",\"beforeUpdate\",\"updated\",\"beforeDestroy\",\"destroyed\",\"activated\",\"deactivated\",\"errorCaptured\",\"serverPrefetch\"],C={optionMergeStrategies:Object.create(null),silent:!1,productionTip:!1,devtools:!1,performance:!1,errorHandler:null,warnHandler:null,ignoredElements:[],keyCodes:Object.create(nu"
+    },
+    {
+      "requestId": "59473.97",
+      "url": "https://learningsuite.byu.edu/plugins/MathJax/MathJax.js?config=TeX-AMS-MML_HTMLorMML&lsv=2.7.5",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": "/*\n *  /MathJax.js\n *\n *  Copyright (c) 2009-2018 The MathJax Consortium\n *\n *  Licensed under the Apache License, Version 2.0 (the \"License\");\n *  you may not use this file except in compliance with the License.\n *  You may obtain a copy of the License at\n *\n *      http://www.apache.org/licenses/LICENSE-2.0\n *\n *  Unless required by applicable law or agreed to in writing, software\n *  distributed under the License is distributed on an \"AS IS\" BASIS,\n *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n *  See the License for the specific language governing permissions and\n *  limitations under the License.\n */\n\nif(document.getElementById&&document.childNodes&&document.createElement){if(!(window.MathJax&&MathJax.Hub)){if(window.MathJax){window.MathJax={AuthorConfig:window.MathJax}}else{window.MathJax={}}MathJax.isPacked=true;MathJax.version=\"2.7.5\";MathJax.fileversion=\"2.7.5\";MathJax.cdnVersion=\"2.7.5\";MathJax.cdnFileVersions={};(function(d){var b=window[d];if(!b){b=window[d]={}}var e=[];var c=function(f){var g=f.constructor;if(!g){g=function(){}}for(var h in f){if(h!==\"constructor\"&&f.hasOwnProperty(h)){g[h]=f[h]}}return g};var a=function(){return function(){return arguments.callee.Init.call(this,arguments)}};b.Object=c({constructor:a(),Subclass:function(f,h){var g=a();g.SUPER=this;g.Init=this.Init;g.Subclass=this.Subclass;g.Augment=this.Augment;g.protoFunction=this.protoFunction;g.can=this.can;g.has=this.has;g.isa=this.isa;g.prototype=new this(e);g.prototype.constructor=g;g.Augment(f,h);return g},Init:function(f){var g=this;if(f.length===1&&f[0]===e){return g}if(!(g instanceof f.callee)){g=new f.callee(e)}return g.Init.apply(g,f)||g},Augment:function(f,g){var h;if(f!=null){for(h in f){if(f.hasOwnProperty(h)){this.protoFunction(h,f[h])}}if(f.toString!==this.prototype.toString&&f.toString!=={}.toString){this.protoFunction(\"toString\",f.toString)}}if(g!=null){for(h in g){if(g.hasOwnProperty(h)){this[h]=g[h]}}}return this},protoFunction:function(g,f){this.prototype[g]=f;if(typeof f===\"function\"){f.SUPER=this.SUPER.prototype}},prototype:{Init:function(){},SUPER:function(f){return f.callee.SUPER},can:function(f){return typeof(this[f])===\"function\"},has:function(f){return typeof(this[f])!==\"undefined\"},isa:function(f){return(f instanceof Object)&&(this instanceof f)}},can:function(f){return this.prototype.can.call(this,f)},has:function(f){return this.prototype.has.call(this,f)},isa:function(g){var f=this;while(f){if(f===g){return true}else{f=f.SUPER}}return false},SimpleSUPER:c({constructor:function(f){return this.SimpleSUPER.define(f)},define:function(f){var h={};if(f!=null){for(var g in f){if(f.hasOwnProperty(g)){h[g]=this.wrap(g,f[g])}}if(f.toString!==this.prototype.toString&&f.toString!=={}.toString){h.toString=this.wrap(\"toString\",f.toString)}}return h},wrap:function(i,h){if(typeof(h)!==\"function\"||!h.toString().match(/\\.\\s*SUPER\\s*\\(/)){return h}var g=function(){this.SUPER=g.SUPER[i];try{var f=h.apply(this,arguments)}catc"
+    },
+    {
+      "requestId": "59473.107",
+      "url": "https://learningsuite.byu.edu/plugins/MathJax/config/TeX-AMS-MML_HTMLorMML.js?V=2.7.5",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": "/*\n *  /MathJax/config/TeX-AMS-MML_HTMLorMML.js\n *  \n *  Copyright (c) 2010-2018 The MathJax Consortium\n *\n *  Part of the MathJax library.\n *  See http://www.mathjax.org for details.\n * \n *  Licensed under the Apache License, Version 2.0;\n *  you may not use this file except in compliance with the License.\n *\n *      http://www.apache.org/licenses/LICENSE-2.0\n */\n\nMathJax.Hub.Config({delayJaxRegistration: true});\n\nMathJax.Ajax.Preloading(\n  \"[MathJax]/jax/input/TeX/config.js\",\n  \"[MathJax]/jax/input/MathML/config.js\",\n  \"[MathJax]/jax/output/HTML-CSS/config.js\",\n  \"[MathJax]/jax/output/NativeMML/config.js\",\n  \"[MathJax]/jax/output/PreviewHTML/config.js\",\n  \"[MathJax]/config/MMLorHTML.js\",\n  \"[MathJax]/extensions/tex2jax.js\",\n  \"[MathJax]/extensions/mml2jax.js\",\n  \"[MathJax]/extensions/MathEvents.js\",\n  \"[MathJax]/extensions/MathZoom.js\",\n  \"[MathJax]/extensions/MathMenu.js\",\n  \"[MathJax]/jax/element/mml/jax.js\",\n  \"[MathJax]/extensions/toMathML.js\",\n  \"[MathJax]/extensions/TeX/noErrors.js\",\n  \"[MathJax]/extensions/TeX/noUndefined.js\",\n  \"[MathJax]/jax/input/TeX/jax.js\",\n  \"[MathJax]/extensions/TeX/AMSmath.js\",\n  \"[MathJax]/extensions/TeX/AMSsymbols.js\",\n  \"[MathJax]/jax/input/MathML/jax.js\",\n  \"[MathJax]/jax/output/PreviewHTML/jax.js\",\n  \"[MathJax]/extensions/fast-preview.js\",\n  \"[MathJax]/extensions/AssistiveMML.js\",\n  \"[MathJax]/extensions/a11y/accessibility-menu.js\"\n);\n\nMathJax.Hub.Config({\n  extensions: ['[a11y]/accessibility-menu.js']\n});\n\nMathJax.InputJax.TeX=MathJax.InputJax({id:\"TeX\",version:\"2.7.5\",directory:MathJax.InputJax.directory+\"/TeX\",extensionDir:MathJax.InputJax.extensionDir+\"/TeX\",config:{TagSide:\"right\",TagIndent:\"0.8em\",MultLineWidth:\"85%\",equationNumbers:{autoNumber:\"none\",formatNumber:function(a){return a},formatTag:function(a){return\"(\"+a+\")\"},formatID:function(a){return\"mjx-eqn-\"+String(a).replace(/\\s/g,\"_\")},formatURL:function(b,a){return a+\"#\"+encodeURIComponent(b)},useLabelIds:true}},resetEquationNumbers:function(){}});MathJax.InputJax.TeX.Register(\"math/tex\");MathJax.InputJax.TeX.loadComplete(\"config.js\");\nMathJax.InputJax.MathML=MathJax.InputJax({id:\"MathML\",version:\"2.7.5\",directory:MathJax.InputJax.directory+\"/MathML\",extensionDir:MathJax.InputJax.extensionDir+\"/MathML\",entityDir:MathJax.InputJax.directory+\"/MathML/entities\",config:{useMathMLspacing:false}});MathJax.InputJax.MathML.Register(\"math/mml\");MathJax.InputJax.MathML.loadComplete(\"config.js\");\nMathJax.OutputJax[\"HTML-CSS\"]=MathJax.OutputJax({id:\"HTML-CSS\",version:\"2.7.5\",directory:MathJax.OutputJax.directory+\"/HTML-CSS\",extensionDir:MathJax.OutputJax.extensionDir+\"/HTML-CSS\",autoloadDir:MathJax.OutputJax.directory+\"/HTML-CSS/autoload\",fontDir:MathJax.OutputJax.directory+\"/HTML-CSS/fonts\",webfontDir:MathJax.OutputJax.fontDir+\"/HTML-CSS\",config:{noReflows:true,matchFontHeight:true,scale:100,minScaleAdjust:50,availableFonts:[\"STIX\",\"TeX\"],preferredFont:\"TeX\",webFont:\"TeX\",imageFont:\"TeX\",undefinedFamily:\"STIXGeneral,'Arial Unicode MS',serif\",mtextFontInherit"
+    },
+    {
+      "requestId": "218470A21315F54E24F3360D141AD610",
+      "url": "https://learningsuite.byu.edu/.iHfH/cid-hyJ_vrOhPXh7/student/gradebook",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "text/html",
+      "responseBody": "\n<!doctype html>\n<html lang=\"en\" class=\"h-full\">\n\t<head>\t<script type=\"text/javascript\" src=\"/ruxitagentjs_ICA15789NPRTUVXfqrux_10331260218130851.js\" data-dtconfig=\"rid=RID_-1815034252|rpid=1157957402|domain=byu.edu|reportUrl=https://bf19966hyx.bf.dynatrace.com/bf|app=5c01f50ec8455dbe|cors=1|owasp=1|featureHash=ICA15789NPRTUVXfqrux|rdnt=1|uxrgce=1|cuc=lg366a9h|mel=100000|expw=1|dpvc=1|lastModification=1771863129750|tp=500,50,0|srbbv=2|agentUri=/ruxitagentjs_ICA15789NPRTUVXfqrux_10331260218130851.js\" data-config='{\"revision\":1771863129750,\"beaconUri\":\"https://bf19966hyx.bf.dynatrace.com/bf\",\"agentUri\":\"/ruxitagentjs_ICA15789NPRTUVXfqrux_10331260218130851.js\",\"environmentId\":\"lg366a9h\",\"modules\":\"ICA15789NPRTUVXfqrux\"}' data-envconfig='{\"tracestateKeyPrefix\":\"3d62b73f-6a8f088b\"}' data-appconfig='{\"app\":\"5c01f50ec8455dbe\"}'></script><script async src=\"https://www.googletagmanager.com/gtag/js?id=G-H686GYWJFJ\"></script>\n\t<script>\n\twindow.dataLayer = window.dataLayer || [];\n\tfunction gtag(){dataLayer.push(arguments);}\n\tgtag('js', new Date());\n\tfunction lsgtag(p){\n\t\tlet arg={},pn=\"\";\n\t\tif(p){arg={'page_path':p};pn=p;}else{pn=document.location.pathname};\n\t\tlet r=pn.replace(\"/student,home\", \"/student/home\")\n\t\t\t.replace(/subsessionID=[0-9a-zA-Z_-]{4}/, \"\")\n\t\t\t.replace(/studentid=\\d{9}/, \"studentid=\")\n\t\t\t.replace(/^\\/\\.[0-9a-zA-Z_-]{4}/, \"\")\n\t\t\t.replace(/cid-[0-9a-zA-Z_-]{12}\\//, \"cid-/\")\n\t\t\t.replace(/id-[0-9a-zA-Z_-]{4}/, \"id-\")\n\t\t\t.replace(/groupid=[0-9a-zA-Z_-]{12}/, \"groupid=\")\n\t\t\t.replace(/discussionid=[0-9a-zA-Z_-]{12}/, \"discussionid=\")\n\t\t\t.replace(/[?&]$/, \"\");\n\t\tif(r==\"\"){r=\"/\";}\n\t\targ[\"page_title\"]=r;\n\t\targ[\"page_location\"]=r;\n\t\targ[\"cookie_domain\"]='learningsuite.byu.edu';\n\t\tgtag('config', 'G-H686GYWJFJ', arg);\n\t\tgtag('event', 'ls_page_view', {page:r,host:document.location.host});\n\t}\n\tlsgtag();\n\t</script>\n\t<meta charset=\"UTF-8\">\n\t<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge,chrome=1\">\n\t<title>BYU Learning Suite</title>\n\t<meta name=\"description\" content=\"Brigham Young University's online learning management system\">\n\t<meta name=\"author\" content=\"BYU Center for Teaching and Learning\">\n\t<meta name=\"google\" content=\"notranslate\" />\n\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n\t<base href=\"/\" />\n\t<link rel=\"shortcut icon\" href=\"images/favicon.ico\">\n\t<link rel=\"apple-touch-icon\" href=\"images/apple-touch-icon.png\">\n\t<link rel=\"stylesheet\" media=\"all\" href=\"css/fontawesome6.css?v=40fd\" /><link id=\"lstwstyle\" rel=\"stylesheet\" media=\"all\" href=\"css/tailwind-vue.css?v=40fd\" /><script type=\"text/javascript\">\n\tvar global_appID = 'student',\n\tglobal_viewID = 'gradebook',\n\tglobal_pageID = 'assignments',\n\tglobal_courseID\t= 'hyJ_vrOhPXh7',\n\tglobal_topUrl\t= '.iHfH/student/top',\n\tglobal_redirectFormKey\t= 'redirect',\n\tglobal_redirectJump\t= 'redirect-jump',\n\tglobal_useDriverBuild = true,\n\tglobal_firstDayOfPeriod = '01/07/2026',\n\tglobal_lastDayOfPeriod = '04/22/2026',\n\tglobal_firstDayOfPeriodUnixMS = 1767769200000,\n\tglobal_lastDayOfPer"
+    },
+    {
+      "requestId": "59473.108",
+      "url": "https://learningsuite.byu.edu/font/fontawesome6/fa-solid-900.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.110",
+      "url": "https://learningsuite.byu.edu/font/fontawesome6/fa-light-300.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.112",
+      "url": "https://learningsuite.byu.edu/font/metropolis/Metropolis-Light.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.116",
+      "url": "https://learningsuite.byu.edu/font/metropolis/Metropolis-Medium.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": null
+    },
+    {
+      "requestId": "59473.98",
+      "url": "https://learningsuite.byu.edu/app/drivers/student/gradebook/assignments/drivervue-build.js?v=40mV",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "application/javascript",
+      "responseBody": "!function(e,t){\"object\"==typeof module&&\"object\"==typeof module.exports?module.exports=e.document?t(e,!0):function(e){if(!e.document)throw new Error(\"jQuery requires a window with a document\");return t(e)}:t(e)}(\"undefined\"!=typeof window?window:this,function(e,t){var n=[],s=e.document,i=n.slice,a=n.concat,r=n.push,o=n.indexOf,c={},l=c.toString,u=c.hasOwnProperty,d={},p=\"2.2.3\",h=function(e,t){return new h.fn.init(e,t)},f=/^[\\s\\uFEFF\\xA0]+|[\\s\\uFEFF\\xA0]+$/g,m=/^-ms-/,g=/-([\\da-z])/gi,v=function(e,t){return t.toUpperCase()};function b(e){var t=!!e&&\"length\"in e&&e.length,n=h.type(e);return\"function\"!==n&&!h.isWindow(e)&&(\"array\"===n||0===t||\"number\"==typeof t&&t>0&&t-1 in e)}h.fn=h.prototype={jquery:p,constructor:h,selector:\"\",length:0,toArray:function(){return i.call(this)},get:function(e){return null!=e?0>e?this[e+this.length]:this[e]:i.call(this)},pushStack:function(e){var t=h.merge(this.constructor(),e);return t.prevObject=this,t.context=this.context,t},each:function(e){return h.each(this,e)},map:function(e){return this.pushStack(h.map(this,function(t,n){return e.call(t,n,t)}))},slice:function(){return this.pushStack(i.apply(this,arguments))},first:function(){return this.eq(0)},last:function(){return this.eq(-1)},eq:function(e){var t=this.length,n=+e+(0>e?t:0);return this.pushStack(n>=0&&t>n?[this[n]]:[])},end:function(){return this.prevObject||this.constructor()},push:r,sort:n.sort,splice:n.splice},h.extend=h.fn.extend=function(){var e,t,n,s,i,a,r=arguments[0]||{},o=1,c=arguments.length,l=!1;for(\"boolean\"==typeof r&&(l=r,r=arguments[o]||{},o++),\"object\"==typeof r||h.isFunction(r)||(r={}),o===c&&(r=this,o--);c>o;o++)if(null!=(e=arguments[o]))for(t in e)n=r[t],r!==(s=e[t])&&(l&&s&&(h.isPlainObject(s)||(i=h.isArray(s)))?(i?(i=!1,a=n&&h.isArray(n)?n:[]):a=n&&h.isPlainObject(n)?n:{},r[t]=h.extend(l,a,s)):void 0!==s&&(r[t]=s));return r},h.extend({expando:\"jQuery\"+(p+Math.random()).replace(/\\D/g,\"\"),isReady:!0,error:function(e){throw new Error(e)},noop:function(){},isFunction:function(e){return\"function\"===h.type(e)},isArray:Array.isArray,isWindow:function(e){return null!=e&&e===e.window},isNumeric:function(e){var t=e&&e.toString();return!h.isArray(e)&&t-parseFloat(t)+1>=0},isPlainObject:function(e){var t;if(\"object\"!==h.type(e)||e.nodeType||h.isWindow(e))return!1;if(e.constructor&&!u.call(e,\"constructor\")&&!u.call(e.constructor.prototype||{},\"isPrototypeOf\"))return!1;for(t in e);return void 0===t||u.call(e,t)},isEmptyObject:function(e){var t;for(t in e)return!1;return!0},type:function(e){return null==e?e+\"\":\"object\"==typeof e||\"function\"==typeof e?c[l.call(e)]||\"object\":typeof e},globalEval:function(e){var t,n=eval;(e=h.trim(e))&&(1===e.indexOf(\"use strict\")?((t=s.createElement(\"script\")).text=e,s.head.appendChild(t).parentNode.removeChild(t)):n(e))},camelCase:function(e){return e.replace(m,\"ms-\").replace(g,v)},nodeName:function(e,t){return e.nodeName&&e.nodeName.toLowerCase()===t.toLowerCase()},each:function(e,t){var n,s=0;if(b(e))for(n=e.length;"
+    },
+    {
+      "requestId": "59473.124",
+      "url": "https://learningsuite.byu.edu/images/byu_logo.svg",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "responseBody": "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz48c3ZnIHdpZHRoPSI1NTMuMDUiIGhlaWdodD0iMTU2LjQxIiB2ZXJzaW9uPSIxLjEiIHZpZXdCb3g9IjAgMCA1NTMuMDQ2MjYgMTU2LjQxIiB4bWw6c3BhY2U9InByZXNlcnZlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOmNjPSJodHRwOi8vY3JlYXRpdmVjb21tb25zLm9yZy9ucyMiIHhtbG5zOmRjPSJodHRwOi8vcHVybC5vcmcvZGMvZWxlbWVudHMvMS4xLyIgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj48bWV0YWRhdGE+PHJkZjpSREY+PGNjOldvcmsgcmRmOmFib3V0PSIiPjxkYzpmb3JtYXQ+aW1hZ2Uvc3ZnK3htbDwvZGM6Zm9ybWF0PjxkYzp0eXBlIHJkZjpyZXNvdXJjZT0iaHR0cDovL3B1cmwub3JnL2RjL2RjbWl0eXBlL1N0aWxsSW1hZ2UiLz48ZGM6dGl0bGUvPjwvY2M6V29yaz48L3JkZjpSREY+PC9tZXRhZGF0YT48c3R5bGUgdHlwZT0idGV4dC9jc3MiPi5zdDB7ZmlsbDojMDAyOTU3O308L3N0eWxlPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC04My40ODIgLTY1Ljc3KSIgZmlsbD0iIzAwMjk1NyI+PHBhdGggY2xhc3M9InN0MCIgZD0ibTE0Ni4yIDEyNC45M3YtMjYuNzdjMC0yLjA3LTAuMy0zLjY3LTAuMy0zLjY3czEuODcgMC4zIDMuNjggMC4zaDIwLjE4YzE1LjM2IDAgMjQuMzggMi4zOCAyNC4zOCAxNi4zNCAwIDkuMDctNS42IDE3LjE3LTIzLjc1IDE3LjE3aC0yMC44MWMtMS44MiAwLTMuNjIgMC4yMy0zLjYyIDAuMjNzMC4yNC0xLjc1IDAuMjQtMy42em0wIDYxLjQ0di0zMC45N2MwLTIuMDgtMC4yNS0zLjYyLTAuMjUtMy42MnMxLjgxIDAuMjUgMy42MiAwLjI1aDE3LjA3YzEzLjYxIDAgMzAuMjggMCAzMC4yOCAxOC44NSAwIDEzLjk2LTExLjkzIDE4Ljg1LTI3Ljk4IDE4Ljg1aC0xOS4zN2MtMS44MyAwLTMuNTggMC4yNy0zLjU4IDAuMjdzMC4yMS0xLjg1IDAuMjEtMy42M3ptLTQ4Ljk0LTEwOC4yNC0wLjAyIDEyOC45MmMwIDQuMTggMC4yNSA1LjY3LTIuNzEgNy41MS0yLjkgMS44LTUuODcgMi4wOS0xMC42NCAyLjkxIDAgMC0wLjA1IDAuMDEtMC4wOSAwLjAyLTAuNDggMC4xMi0wLjM5IDEuOTIgMC4wOSAxLjkyaDEwNC4yOWM0My45OSAwIDYyLjQ5LTE3LjQ2IDYyLjQ5LTQ0LjY5IDAtMjAuMTMtOS4zNy0zMi40NC0yNy45NC0zNy4wNi0wLjMxLTAuMDgtMC4zMy0wLjUgMC0wLjU5IDExLjgzLTMuNjkgMjIuNy0xMi4yNSAyMi43LTMzLjIxIDAtMjguNDItMTkuMi0zOC4wNS02MS4wOS0zOC4wNWgtMTAwLjQyYy0wLjQ4IDAtMC41OCAxLjgtMC4xIDEuOTIgMC4wNCAwLjAxIDAuMDkgMC4wMiAwLjA5IDAuMDIgNC43NyAwLjgxIDcuNzQgMS4xMSAxMC42NCAyLjkxIDIuOTYgMS44MyAyLjcxIDMuMjkgMi43MSA3LjQ3eiIvPjxwYXRoIGNsYXNzPSJzdDAiIGQ9Im02MjIuNzYgNzguMTRjMC00LjE4LTAuMjUtNS42NSAyLjcyLTcuNDkgMi45LTEuOCA1Ljg3LTIuMDkgMTAuNjQtMi45MSAwIDAgMC4wNS0wLjAxIDAuMDktMC4wMiAwLjQ4LTAuMTIgMC4zOS0xLjkxLTAuMDktMS45MWgtNzYuOTNjLTAuNDggMC0wLjU3IDEuOC0wLjEgMS45MSAwLjA0IDAuMDEgMC4wOSAwLjAyIDAuMDkgMC4wMiA0Ljg2IDAuNjEgNy4xMSAxLjExIDEwLjAxIDIuOTEgMi45NiAxLjg0IDIuNzEgMy4zMSAyLjcxIDcuNDl2NzcuNDhjMCAxNy42Ny0xMC4xMiAzMS4yNC0zMC4yMSAzMS4yNHMtMzAuMjEtMTMuNTctMzAuMjEtMzEuMjR2LTc3LjQ2YzAtNC4xOC0wLjI1LTUuNjcgMi43Mi03LjUxIDIuOS0xLjggNS4zMi0yLjI1IDEwLjAxLTIuOTEgMCAwIDAuMDUtMC4wMSAwLjA5LTAuMDIgMC40OC0wLjEyIDAuMzktMS45Mi0wLjEtMS45MmgtNzIuNTljLTAuNTQgMC0wLjQzIDEuODEgMC4wMiAxLjkxIDAuMDQgMC4wMSAwLjA5IDAuMDIgMC4wOSAwLjAyIDIuNjUgMC4xNiA0LjQ4IDAuMzEgNi4xMSAxLjcgMi40MiAyLjA2IDIuODEgNC41MSAyLjgxIDguNjl2NzYuMTZjMCAzNi43MiAyMC4wOSA2Ny45IDgxLjA2IDY3LjlzODEuMDYtMzEuMTggODEuMDYtNjcuOXYtNzYuMTR6Ii8+PHBhdGggY2xhc3M9InN0MCIgZD0ibTM4OS42NCAyMTkuNDFjMC40OCAwIDAuNTgtMS44IDAuMS0xLjkyLTAuMDQtMC4wMS0wLjA5LTAuMDItMC4wOS0wLjAyLTQuNzctMC44MS03Ljc0LTEuMTEtMTAuNjQtMi45MS0yLjk2LTEuODQtMi43Mi0zLjMyLTIuNzItNy41MXYtNDguOTNsNTMuMi03OC45OWMyLjkyLTQuMzMgNC43OC02LjU5"
+    },
+    {
+      "requestId": "59473.125",
+      "url": "https://learningsuite.byu.edu/images/ls_logo.svg",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "responseBody": "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjwhLS0gR2VuZXJhdG9yOiBBZG9iZSBJbGx1c3RyYXRvciAyMy4wLjIsIFNWRyBFeHBvcnQgUGx1Zy1JbiAuIFNWRyBWZXJzaW9uOiA2LjAwIEJ1aWxkIDApICAtLT4NCjxzdmcgdmVyc2lvbj0iMS4xIiBpZD0iTGF5ZXJfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiDQoJIHZpZXdCb3g9IjAgMCAyNzQgMjc2IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAyNzQgMjc2OyIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+DQo8c3R5bGUgdHlwZT0idGV4dC9jc3MiPg0KCS5zdDB7ZmlsbDojNjM5N0NCO30NCgkuc3Qxe2ZpbGw6IzJFNUI5Mjt9DQo8L3N0eWxlPg0KPGc+DQoJPGc+DQoJCTxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik01MC4wMyw0MC4zOGMwLDEuMiwwLDEuOTcsMCwyLjc0YzAsNDEuMjctMC4xLDgyLjU0LDAuMDcsMTIzLjgxYzAuMDQsOS43NCwyLjg2LDE4LjkxLDguODcsMjYuNzgNCgkJCWM1LjMsNi45MywxMi41MSwxMS4xMSwyMC44MSwxMy40OGM1LjA5LDEuNDUsMTAuMjYsMi4zOSwxNS41OCwyLjQxYzIuODgsMC4wMSw1Ljc2LDAuMzUsOC42NCwwLjM1DQoJCQljMjMuODYsMC4wMyw0Ny43MywwLjE5LDcxLjU5LTAuMDdjOS42NS0wLjExLDE5LjA2LTEuOTgsMjcuMS03Ljk4YzUuOS00LjQxLDkuODItMTAuMiwxMS45MS0xNy4yNQ0KCQkJYzEuNzEtNS43NywyLjMzLTExLjY4LDEuOTMtMTcuNjNjLTAuNjctOS44Ny0zLjM4LTE5LTEwLjk1LTI1Ljk3Yy00LjgtNC40Mi0xMC41Ni03LjA5LTE2Ljg3LTguNTkNCgkJCWMtNS42Ny0xLjM1LTExLjQxLTIuMDMtMTcuMjUtMi4wMWMtMTEuNDcsMC4wMy0yMi45NCwwLjEyLTM0LjQxLTAuMDVjLTQuMy0wLjA2LTguNTgtMC44NC0xMi4yLTMuNQ0KCQkJYy0zLjUyLTIuNTgtNS40OS02LjA2LTUuNTctMTAuNDZjLTAuMDctMy41Mi0wLjIxLTcsMS40NS0xMC4zN2MyLjE3LTQuNDEsNS44Ny02LjUyLDEwLjMyLTcuNjJjMS42Mi0wLjQsMy4zNy0wLjQzLDUuMDYtMC40Mw0KCQkJYzM5Ljg4LTAuMDIsNzkuNzcsMCwxMTkuNjUtMC4wNmMxLjkzLDAsMi44MiwwLjUzLDMuMiwyLjQyYzEuMjQsNi4xNiwyLjY5LDEyLjI4LDMuODgsMTguNDZjMS41NCw4LjA0LDEuNDgsMTYuMiwxLjEyLDI0LjMxDQoJCQljLTAuMjYsNi4wMy0xLjExLDEyLjA2LTIuMDgsMTguMDJjLTEuNTIsOS4zMy00LjQ3LDE4LjMtOC4xOCwyNi45N2MtMy41MSw4LjIyLTcuNywxNi4xNC0xMy4xNSwyMy4yNQ0KCQkJYy00LjYsNi05LjMzLDExLjk4LTE0LjYzLDE3LjM0Yy04LjQ2LDguNTYtMTguMTYsMTUuNi0yOC43NSwyMS40NGMtMTAuNTcsNS44My0yMS43NCwxMC4wMy0zMy40NywxMi42NA0KCQkJYy01LjU2LDEuMjQtMTEuMjksMS44MS0xNi45NiwyLjVjLTMuNjMsMC40NC03LjI5LDAuNzctMTAuOTQsMC43NmMtMy45OC0wLjAxLTcuOTUtMC41Mi0xMS45My0wLjcyDQoJCQljLTcuMjUtMC4zNS0xNC4zMS0xLjc0LTIxLjMxLTMuNTZjLTEwLjktMi44My0yMS4yNC03LTMxLjAzLTEyLjZjLTcuODktNC41MS0xNS4yMi05Ljc1LTIyLjA0LTE1Ljc4DQoJCQljLTEwLjM4LTkuMTgtMTguOTYtMTkuNzUtMjUuOTgtMzEuNjhjLTYuNTUtMTEuMTUtMTEuMTctMjMuMDYtMTQuMTEtMzUuNmMtMS4yNC01LjI5LTEuOS0xMC43NS0yLjQ2LTE2LjE3DQoJCQljLTAuNTMtNS4wNy0wLjgyLTEwLjE5LTAuNzktMTUuMjljMC4wNi04LjQyLDEuMDktMTYuNzcsMi44My0yNS4wMUMxMS4zNSw5OC42MSwxNS4xNSw4OC4wMywyMC4zNSw3OA0KCQkJYzQuMzgtOC40Niw5LjQyLTE2LjUzLDE1LjgxLTIzLjY0YzMuODEtNC4yNSw3Ljc4LTguMzYsMTEuNzEtMTIuNDlDNDguMzcsNDEuMzQsNDkuMDksNDEuMDIsNTAuMDMsNDAuMzh6Ii8+DQoJCTxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik0yNDcuODIsNzQuNjdjLTAuOTksMC0xLjc4LDAtMi41NiwwYy0zNy4zMSwwLTc0LjYzLTAuMTItMTExLjk0LDAuMDljLTguOTUsMC4wNS0xNy41NiwyLjQzLTI0LjczLDguMTINCgkJCWMtNiw0Ljc2LTkuNzQsMTEuMS0xMS41MiwxOC42NGMtMS4zNCw1LjY4LTEuNDgsMTEuNDQtMS4wNSwxNy4xNGMwLjY1LDguNzgsMy42OCwxNi43OSwxMC4yLDIyLjk5YzUsNC43NiwxMS4xNSw3LjQ0LDE3Ljg4LDkuMDINCgkJCWM2LjI5LDEuNDgsMTIuNjQsMS41OSwxOS4wNCwxLjU1YzkuNDMtMC4wNiwxOC44"
+    },
+    {
+      "requestId": "59473.63",
+      "url": "https://learningsuite.byu.edu/font/metropolis/Metropolis-MediumItalic.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": "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"
+    },
+    {
+      "requestId": "59473.59",
+      "url": "https://learningsuite.byu.edu/font/metropolis/Metropolis-LightItalic.woff2",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "font/woff2",
+      "responseBody": "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"
+    },
+    {
+      "requestId": "59473.131",
+      "url": "https://learningsuite.byu.edu/images/favicon.ico",
+      "method": "GET",
+      "postData": null,
+      "status": 200,
+      "mimeType": "image/vnd.microsoft.icon",
+      "responseBody": "AAABAAMAMDAAAAEAIACoJQAANgAAACAgAAABACAAqBAAAN4lAAAQEAAAAQAgAGgEAACGNgAAKAAAADAAAABgAAAAAQAgAAAAAAAAJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////C////yz///9W////f////57///+z////vP///7v///+w////mv///3n///9Q////Jv///wgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////B////zT///97////u////+T////4/////v////////////////////////////////////7////2////3////7P///9w////K////wUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///wr///9M////rf///+3///////////78+//58+3/8+fb/+7dzP/r1sL/6NC5/+fPuP/q1sH/7+DQ//Tq3//69O///v38///////////+////5////6D///9A////BgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD///8C////O////67////1//////78+//16+D/58+3/9q2kf/SpXj/zZxq/8yYZf/Ll2P/ypZh/8qWYf/Ll2P/zJlm/86dbP/Spnn/27eT/+jRuv/27OP//v37///////////v////nv///y7///8BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///xH///98////6f/////9+/n/8ODR/9y5lv/Pn2//y5Zi/8qVYf/LlmL/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXYv/LlmL/ypVg/8uWYv/QoHH/3buZ//Hj1P/9/Pr//////////9////9p////CgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////Jf///6/////8//7+//To3f/cuZb/zZtp/8qVYf/LlmL/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//LlmL/ypVh/82cav/dvJr/9evh/////v/////4////mv///xkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD///8z////yf/////8+vf/59C4/9Chcv/KlWH/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXYv/KlmH/0aN0/+nTvf/9+/n//////v///7b///8jAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///zP////Q//////r07//evZ3/zJhl/8uWYv/Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5Zi/8yZZv/gwaH/+/by//////////++////IgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////Jf///8n/////+PLr/9q1j//LlmL/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//LlmL/3LmV//r17///////////s////xcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD///8R////rv/////69O//2rSP/8qWYf/Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5Zi/927mf/7+PT//////////5X///8IAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///wH///98/////fz69//evZz/y5Zi/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXYv/LlmL/ypZh/8qWYf/KlmH/ypZh/8qWYf/KlmH/ypZh/8qWYf/KlmH/ypZh/8qWYf/KlmH/ypZh/8qWYf/KlmH/y5Zi/8uXY//Ll2P/y5dj/8uXY//Ll2P/y5dj/8uXY//ixqn//vz7//////b///9hAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///zz////o/////+fPuP/MmGX/y5dj/8uXY//Ll2P/"
+    }
+  ]
+}

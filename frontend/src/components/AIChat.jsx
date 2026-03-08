@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { API_BASE } from '../config/api'
+import { authFetch, API_BASE } from '../lib/api'
 import './AIChat.css'
 
 const STORAGE_KEY = 'campus-ai-chat'
@@ -64,7 +64,7 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
       setIsLoading(true)
       setMessages([{ role: 'assistant', content: '' }])
       try {
-        const res = await fetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' })
+        const res = await authFetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' })
         if (res.ok) {
           const data = await res.json()
           const greeting = data.briefing || "Here's your schedule overview for today."
@@ -127,9 +127,8 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
     try {
-      const response = await fetch(`${API_BASE}/ai/chat`, {
+      const response = await authFetch(`${API_BASE}/ai/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: nextMessages }),
       })
 
@@ -238,9 +237,8 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
     if (isApplying) return
     setIsApplying(true)
     try {
-      const response = await fetch(`${API_BASE}/ai/apply-plan`, {
+      const response = await authFetch(`${API_BASE}/ai/apply-plan`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages }),
       })
       const data = await response.json()

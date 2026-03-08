@@ -1,9 +1,11 @@
 import { useState, useEffect, Component } from 'react'
 import Dashboard from './components/Dashboard'
 import LoginPage from './components/LoginPage'
+import AuthPage from './components/AuthPage'
 import OnboardingSurvey from './components/OnboardingSurvey'
 import { registerPushNotifications, isPushSupported, getPushPermission } from './utils/pushNotifications'
-import { API_BASE } from './config/api'
+import { supabase } from './lib/supabase'
+import { authFetch, API_BASE } from './lib/api'
 import './App.css'
 
 class ErrorBoundary extends Component {
@@ -35,36 +37,65 @@ class ErrorBoundary extends Component {
 }
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(null) // null = loading
+  // null = loading, false = no session, object = session
+  const [session, setSession] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Whether BYU Learning Suite or Canvas is connected (backend auth)
+  const [isBYUConnected, setIsBYUConnected] = useState(false)
+
   const [shouldSync, setShouldSync] = useState(false)
   const [preferences, setPreferences] = useState(null)   // null = not yet loaded
   const [showSurvey, setShowSurvey] = useState(false)
 
-  // Check auth status on mount
+  // On mount: check existing Supabase session and subscribe to auth changes
   useEffect(() => {
-    checkAuthStatus()
-  }, [])
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      setSession(initialSession)
+      if (initialSession) {
+        checkBYUAuth()
+      } else {
+        setIsLoading(false)
+      }
+    })
 
-  const checkAuthStatus = async () => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession)
+      if (newSession) {
+        checkBYUAuth()
+      } else {
+        setIsBYUConnected(false)
+        setPreferences(null)
+        setShowSurvey(false)
+        setIsLoading(false)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const checkBYUAuth = async () => {
     try {
-      const response = await fetch(`${API_BASE}/auth/status`)
+      const response = await authFetch(`${API_BASE}/auth/status`)
       if (response.ok) {
         const data = await response.json()
-        const authed = data.authenticated || data.canvas_connected
-        setIsAuthenticated(authed)
-        if (authed) loadPreferences()
+        const connected = data.authenticated || data.canvas_connected
+        setIsBYUConnected(connected)
+        if (connected) loadPreferences()
       } else {
-        setIsAuthenticated(false)
+        setIsBYUConnected(false)
       }
     } catch (err) {
-      console.error('[App] Error checking auth status:', err)
-      setIsAuthenticated(false)
+      console.error('[App] Error checking BYU auth status:', err)
+      setIsBYUConnected(false)
+    } finally {
+      setIsLoading(false)
     }
   }
 
   const loadPreferences = async () => {
     try {
-      const res = await fetch(`${API_BASE}/preferences`)
+      const res = await authFetch(`${API_BASE}/preferences`)
       if (res.ok) {
         const data = await res.json()
         setPreferences(data)
@@ -91,6 +122,11 @@ function App() {
     registerPushNotifications()
   }
 
+  const handleAuthSuccess = (newSession) => {
+    setSession(newSession)
+    // onAuthStateChange will fire and call checkBYUAuth
+  }
+
   const handleSurveyComplete = (prefs) => {
     setShowSurvey(false)
     if (prefs) {
@@ -100,11 +136,11 @@ function App() {
   }
 
   const handleLoginSuccess = async () => {
-    setIsAuthenticated(true)
+    setIsBYUConnected(true)
     loadPreferences()
     // Only auto-sync if there hasn't been a successful sync in the past 12 hours
     try {
-      const res = await fetch(`${API_BASE}/sync/last`)
+      const res = await authFetch(`${API_BASE}/sync/last`)
       if (res.ok) {
         const data = await res.json()
         const lastSync = data.last_sync
@@ -124,15 +160,16 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API_BASE}/auth/logout`, { method: 'POST' })
+      await authFetch(`${API_BASE}/auth/logout`, { method: 'POST' })
     } catch {
-      // Proceed with local logout even if request fails
+      // Proceed with logout even if backend call fails
     }
-    setIsAuthenticated(false)
+    await supabase.auth.signOut()
+    // onAuthStateChange will fire and reset state
   }
 
   // Loading state
-  if (isAuthenticated === null) {
+  if (isLoading) {
     return (
       <ErrorBoundary>
         <div className="app-loading">
@@ -142,8 +179,17 @@ function App() {
     )
   }
 
-  // Show login page if not authenticated
-  if (!isAuthenticated) {
+  // No Supabase session — show email/password auth page
+  if (!session) {
+    return (
+      <ErrorBoundary>
+        <AuthPage onAuthSuccess={handleAuthSuccess} />
+      </ErrorBoundary>
+    )
+  }
+
+  // Supabase session exists but no BYU/Canvas connection — show BYU connect page
+  if (!isBYUConnected) {
     return (
       <ErrorBoundary>
         <LoginPage onLoginSuccess={handleLoginSuccess} />
@@ -151,7 +197,7 @@ function App() {
     )
   }
 
-  // Show dashboard if authenticated
+  // Fully authenticated — show dashboard
   return (
     <ErrorBoundary>
       {showSurvey && <OnboardingSurvey onComplete={handleSurveyComplete} />}
@@ -161,6 +207,7 @@ function App() {
         onLogout={handleLogout}
         preferences={preferences}
         onPreferencesChange={setPreferences}
+        session={session}
       />
     </ErrorBoundary>
   )

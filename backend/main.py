@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -9,6 +9,8 @@ from typing import Literal, Optional
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client
+
+import jwt as pyjwt  # PyJWT
 
 from sync_service import sync_service
 import auth_store
@@ -128,6 +130,8 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError(
@@ -137,7 +141,11 @@ if not SUPABASE_URL or not SUPABASE_KEY:
         + ". Check your .env file or environment."
     )
 
+# Anon client — used only as a fallback if service key is not set
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Service-role client — bypasses RLS; used for all backend DB operations
+supabase_service = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY) if SUPABASE_SERVICE_KEY else supabase
 
 app = FastAPI(title="AI Scheduling Assistant API", version="1.0.0")
 
@@ -154,6 +162,35 @@ app.add_middleware(
 )
 
 
+# ============== JWT AUTH DEPENDENCY ==============
+
+async def get_current_user(authorization: str = Header(None)) -> str:
+    """Verify Supabase JWT and return the user_id (sub claim)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1]
+    if not SUPABASE_JWT_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="SUPABASE_JWT_SECRET not configured — cannot verify tokens",
+        )
+    try:
+        payload = pyjwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing sub claim")
+        return user_id
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired — please sign in again")
+    except pyjwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+
 @app.get("/")
 def read_root():
     return {"message": "Hello World"}
@@ -168,7 +205,7 @@ def ping():
 # Handle browser-based BYU authentication
 
 @app.post("/auth/browser-login")
-def browser_login():
+def browser_login(user_id: str = Depends(get_current_user)):
     """Start browser-based BYU login.
 
     Opens a browser window to BYU's login page where the user
@@ -178,11 +215,11 @@ def browser_login():
     from scraper.learning_suite_scraper import LearningSuiteScraper
 
     # Check if already authenticating
-    if auth_store.is_authenticated():
+    if auth_store.is_authenticated(user_id):
         return {"success": True, "message": "Already authenticated", "task_id": None}
 
     task_id = auth_store.create_browser_auth_task()
-    logger.info(f"POST /auth/browser-login - Starting browser auth task: {task_id}")
+    logger.info(f"POST /auth/browser-login user={user_id[:8]} - Starting browser auth task: {task_id}")
 
     def run_browser_auth():
         try:
@@ -251,9 +288,9 @@ def browser_login():
                     except Exception as e:
                         logger.debug(f"Browser auth [{task_id[:8]}] - Could not extract sessionStorage: {e}")
 
-                    # Store cookies + URL + web storage, then close the visible browser
-                    auth_store.set_session_data(cookies, dynamic_base_url)
-                    auth_store.set_web_storage(local_storage, session_storage)
+                    # Store cookies + URL + web storage for this user, then close the visible browser
+                    auth_store.set_session_data(user_id, cookies, dynamic_base_url)
+                    auth_store.set_web_storage(user_id, local_storage, session_storage)
                     scraper.close()
                     logger.info(f"Browser auth [{task_id[:8]}] - Visible browser closed")
 
@@ -287,7 +324,7 @@ def browser_login():
 
 
 @app.get("/auth/browser-status/{task_id}")
-def browser_auth_status(task_id: str):
+def browser_auth_status(task_id: str, user_id: str = Depends(get_current_user)):
     """Check the status of a browser authentication task."""
     task = auth_store.get_browser_auth_task(task_id)
 
@@ -302,29 +339,29 @@ def browser_auth_status(task_id: str):
 
 
 @app.get("/auth/status", response_model=AuthStatusResponse)
-def auth_status():
+def auth_status(user_id: str = Depends(get_current_user)):
     """Check if user is authenticated (LS and/or Canvas)."""
-    is_auth = auth_store.is_authenticated()
+    is_auth = auth_store.is_authenticated(user_id)
     return AuthStatusResponse(
         authenticated=is_auth,
         netid=None,  # We don't store netid with browser auth
-        canvas_connected=canvas_auth_store.is_connected(),
+        canvas_connected=canvas_auth_store.is_connected(user_id),
     )
 
 
 @app.post("/auth/logout")
-def logout():
+def logout(user_id: str = Depends(get_current_user)):
     """Clear authentication and close browser session."""
-    logger.info("POST /auth/logout - Clearing authentication")
-    auth_store.clear_authentication()
-    canvas_auth_store.clear_token()
+    logger.info(f"POST /auth/logout user={user_id[:8]}")
+    auth_store.clear_authentication(user_id)
+    canvas_auth_store.clear_token(user_id)
     return {"success": True, "message": "Logged out"}
 
 
 # ============== CANVAS AUTH ROUTES ==============
 
 @app.post("/auth/canvas-token")
-def set_canvas_token(req: CanvasTokenRequest):
+def set_canvas_token(req: CanvasTokenRequest, user_id: str = Depends(get_current_user)):
     """Validate and store a Canvas API token."""
     token = req.token.strip()
     if not token:
@@ -334,32 +371,35 @@ def set_canvas_token(req: CanvasTokenRequest):
     if not valid:
         raise HTTPException(status_code=401, detail=result)
 
-    canvas_auth_store.set_token(token, result)
-    logger.info(f"POST /auth/canvas-token - Connected as {result}")
+    canvas_auth_store.set_token(user_id, token, result)
+    logger.info(f"POST /auth/canvas-token user={user_id[:8]} - Connected as {result}")
     return {"success": True, "user_name": result}
 
 
 @app.get("/auth/canvas-status")
-def canvas_status():
+def canvas_status(user_id: str = Depends(get_current_user)):
     """Check if Canvas is connected."""
     return {
-        "connected": canvas_auth_store.is_connected(),
-        "user_name": canvas_auth_store.get_user_name(),
+        "connected": canvas_auth_store.is_connected(user_id),
+        "user_name": canvas_auth_store.get_user_name(user_id),
     }
 
 
 @app.delete("/auth/canvas-token")
-def delete_canvas_token():
+def delete_canvas_token(user_id: str = Depends(get_current_user)):
     """Disconnect Canvas."""
-    canvas_auth_store.clear_token()
-    logger.info("DELETE /auth/canvas-token - Disconnected")
+    canvas_auth_store.clear_token(user_id)
+    logger.info(f"DELETE /auth/canvas-token user={user_id[:8]}")
     return {"success": True}
 
 
 @app.get("/assignments")
-def get_assignments(exclude_past_submitted: bool = Query(default=False)):
+def get_assignments(
+    exclude_past_submitted: bool = Query(default=False),
+    user_id: str = Depends(get_current_user),
+):
     """Get assignments. Pass exclude_past_submitted=true to skip submitted past-due items."""
-    query = supabase.table("assignments").select("*").order("due_date")
+    query = supabase_service.table("assignments").select("*").eq("user_id", user_id).order("due_date")
     if exclude_past_submitted:
         now_iso = datetime.now(timezone.utc).isoformat()
         # Return assignments where status is not submitted, OR due_date is in the future
@@ -370,11 +410,11 @@ def get_assignments(exclude_past_submitted: bool = Query(default=False)):
 
 # IMPORTANT: Static routes must come BEFORE parameterized routes
 @app.get("/assignments/stats/summary")
-def get_assignment_stats():
+def get_assignment_stats(user_id: str = Depends(get_current_user)):
     """Get assignment statistics for the dashboard."""
     from zoneinfo import ZoneInfo
 
-    response = supabase.table("assignments").select("*").execute()
+    response = supabase_service.table("assignments").select("*").eq("user_id", user_id).execute()
     assignments = response.data or []
 
     mountain = ZoneInfo("America/Denver")
@@ -413,9 +453,9 @@ def get_assignment_stats():
 
 
 @app.get("/assignments/{assignment_id}")
-def get_assignment(assignment_id: str):
+def get_assignment(assignment_id: str, user_id: str = Depends(get_current_user)):
     """Get a single assignment by ID."""
-    response = supabase.table("assignments").select("*").eq("id", assignment_id).execute()
+    response = supabase_service.table("assignments").select("*").eq("id", assignment_id).eq("user_id", user_id).execute()
 
     if not response.data:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -424,7 +464,11 @@ def get_assignment(assignment_id: str):
 
 
 @app.patch("/assignments/{assignment_id}")
-def update_assignment(assignment_id: str, update: AssignmentUpdate):
+def update_assignment(
+    assignment_id: str,
+    update: AssignmentUpdate,
+    user_id: str = Depends(get_current_user),
+):
     """Update assignment fields including status and planning data."""
     # Build update dict with only provided fields
     update_data = {}
@@ -454,9 +498,9 @@ def update_assignment(assignment_id: str, update: AssignmentUpdate):
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    response = supabase.table("assignments").update(
+    response = supabase_service.table("assignments").update(
         update_data
-    ).eq("id", assignment_id).execute()
+    ).eq("id", assignment_id).eq("user_id", user_id).execute()
 
     if not response.data:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -464,17 +508,37 @@ def update_assignment(assignment_id: str, update: AssignmentUpdate):
     return {"assignment": response.data[0]}
 
 
+@app.post("/assignments/dismiss-overdue")
+def dismiss_overdue_assignments(user_id: str = Depends(get_current_user)):
+    """Mark all past-due non-submitted assignments as submitted.
+
+    Used to bulk-clear the overdue list when the scraper misclassified items
+    the student has already completed.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    response = (
+        supabase_service.table("assignments")
+        .update({"status": "submitted", "is_modified": True})
+        .eq("user_id", user_id)
+        .lt("due_date", now_iso)
+        .in_("status", ["not_started", "newly_assigned", "in_progress"])
+        .execute()
+    )
+    count = len(response.data) if response.data else 0
+    return {"dismissed": count}
+
+
 # ============== SYNC ROUTES ==============
 # These handle Learning Suite synchronization
 
 @app.post("/sync/start", response_model=SyncStartResponse)
-def start_sync():
+def start_sync(user_id: str = Depends(get_current_user)):
     """Start a new Learning Suite sync.
 
     Returns immediately with a task_id that can be polled for status.
     """
-    logger.info("POST /sync/start - Starting new sync")
-    task_id, error = sync_service.start_sync()
+    logger.info(f"POST /sync/start user={user_id[:8]}")
+    task_id, error = sync_service.start_sync(user_id)
 
     if error:
         logger.warning(f"POST /sync/start - Rejected: {error}")
@@ -485,7 +549,7 @@ def start_sync():
 
 
 @app.get("/sync/status/{task_id}", response_model=SyncStatusResponse)
-def get_sync_status(task_id: str):
+def get_sync_status(task_id: str, user_id: str = Depends(get_current_user)):
     """Get the status of a sync task.
 
     Poll this endpoint every few seconds to track sync progress.
@@ -502,10 +566,10 @@ def get_sync_status(task_id: str):
 
 
 @app.get("/sync/last")
-def get_last_sync():
+def get_last_sync(user_id: str = Depends(get_current_user)):
     """Get the timestamp and summary of the last successful sync."""
-    logger.debug("GET /sync/last")
-    last_sync = sync_service.get_last_sync()
+    logger.debug(f"GET /sync/last user={user_id[:8]}")
+    last_sync = sync_service.get_last_sync(user_id)
 
     if not last_sync:
         logger.debug("GET /sync/last - No sync history found")
@@ -518,26 +582,27 @@ def get_last_sync():
 # ============== PREFERENCES ROUTES ==============
 
 @app.get("/preferences", response_model=UserPreferences)
-def get_preferences():
+def get_preferences(user_id: str = Depends(get_current_user)):
     """Return current user preferences."""
-    prefs = _fetch_user_preferences()
+    prefs = _fetch_user_preferences(user_id)
     return UserPreferences(**prefs)
 
 
 @app.post("/preferences", response_model=UserPreferences)
-def save_preferences(body: UserPreferencesUpdate):
-    """Create or update user preferences (upserts the single row)."""
-    logger.info("POST /preferences")
+def save_preferences(body: UserPreferencesUpdate, user_id: str = Depends(get_current_user)):
+    """Create or update user preferences (upserts the single row per user)."""
+    logger.info(f"POST /preferences user={user_id[:8]}")
     try:
-        existing = supabase.table("user_preferences").select("id").limit(1).execute()
+        existing = supabase_service.table("user_preferences").select("id").eq("user_id", user_id).limit(1).execute()
         updates = {k: v for k, v in body.model_dump().items() if v is not None}
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        updates["user_id"] = user_id
 
         if existing.data:
             row_id = existing.data[0]["id"]
-            r = supabase.table("user_preferences").update(updates).eq("id", row_id).execute()
+            r = supabase_service.table("user_preferences").update(updates).eq("id", row_id).execute()
         else:
-            r = supabase.table("user_preferences").insert(updates).execute()
+            r = supabase_service.table("user_preferences").insert(updates).execute()
 
         return UserPreferences(**r.data[0])
     except Exception as e:
@@ -547,21 +612,22 @@ def save_preferences(body: UserPreferencesUpdate):
 
 # ============== AI ROUTES ==============
 
-def _fetch_active_assignments() -> list[dict]:
+def _fetch_active_assignments(user_id: str) -> list[dict]:
     """Shared helper: fetch active assignments for AI context."""
     response = (
-        supabase.table("assignments")
+        supabase_service.table("assignments")
         .select("id, title, course_name, due_date, status, estimated_minutes, notes, description, assignment_type, point_value")
+        .eq("user_id", user_id)
         .not_.in_("status", ["submitted", "unavailable"])
         .execute()
     )
     return response.data or []
 
 
-def _fetch_user_preferences() -> dict:
-    """Return the single user_preferences row, or sensible defaults if not set."""
+def _fetch_user_preferences(user_id: str) -> dict:
+    """Return the user_preferences row for this user, or sensible defaults if not set."""
     try:
-        r = supabase.table("user_preferences").select("*").limit(1).execute()
+        r = supabase_service.table("user_preferences").select("*").eq("user_id", user_id).limit(1).execute()
         if r.data:
             return r.data[0]
     except Exception as e:
@@ -591,12 +657,28 @@ def _ai_error_to_http(e: Exception) -> HTTPException:
 
 
 @app.get("/ai/suggestions", response_model=AISuggestionsResponse)
-def get_ai_suggestions():
+def get_ai_suggestions(user_id: str = Depends(get_current_user)):
     """Return the latest cached AI suggestion per assignment."""
     try:
+        # Join through assignments to filter by user_id
+        assignment_ids_resp = (
+            supabase_service.table("assignments")
+            .select("id")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        user_assignment_ids = {a["id"] for a in (assignment_ids_resp.data or [])}
+
+        if not user_assignment_ids:
+            return AISuggestionsResponse(
+                suggestions=[],
+                generated_at=datetime.now(timezone.utc).isoformat(),
+            )
+
         response = (
-            supabase.table("ai_suggestions")
+            supabase_service.table("ai_suggestions")
             .select("*")
+            .in_("assignment_id", list(user_assignment_ids))
             .order("generated_at", desc=True)
             .execute()
         )
@@ -611,7 +693,7 @@ def get_ai_suggestions():
                 seen.add(aid)
                 latest.append(s)
 
-        logger.debug(f"GET /ai/suggestions - {len(latest)} suggestion(s)")
+        logger.debug(f"GET /ai/suggestions user={user_id[:8]} - {len(latest)} suggestion(s)")
         return AISuggestionsResponse(
             suggestions=latest,
             generated_at=datetime.now(timezone.utc).isoformat(),
@@ -622,21 +704,21 @@ def get_ai_suggestions():
 
 
 @app.post("/ai/suggestions/generate", response_model=AISuggestionsResponse)
-def generate_ai_suggestions():
+def generate_ai_suggestions(user_id: str = Depends(get_current_user)):
     """Generate fresh AI priority suggestions for all active assignments.
 
     Synchronous: waits for Groq (~3–8s). Saves results to ai_suggestions table.
     """
-    logger.info("POST /ai/suggestions/generate")
+    logger.info(f"POST /ai/suggestions/generate user={user_id[:8]}")
 
-    assignments = _fetch_active_assignments()
+    assignments = _fetch_active_assignments(user_id)
     if not assignments:
         return AISuggestionsResponse(
             suggestions=[],
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
-    prefs = _fetch_user_preferences()
+    prefs = _fetch_user_preferences(user_id)
     try:
         raw = ai_service.generate_suggestions(assignments, prefs)
     except Exception as e:
@@ -668,7 +750,7 @@ def generate_ai_suggestions():
         raise HTTPException(status_code=502, detail="AI returned no valid suggestions. Try again.")
 
     try:
-        saved = supabase.table("ai_suggestions").insert(rows).execute()
+        saved = supabase_service.table("ai_suggestions").insert(rows).execute()
         logger.info(f"POST /ai/suggestions/generate - saved {len(saved.data)} suggestion(s)")
     except Exception as e:
         logger.error(f"POST /ai/suggestions/generate - DB insert failed: {e}")
@@ -678,18 +760,18 @@ def generate_ai_suggestions():
 
 
 @app.post("/ai/briefing/generate", response_model=AIBriefingResponse)
-def generate_ai_briefing():
+def generate_ai_briefing(user_id: str = Depends(get_current_user)):
     """Generate a natural-language daily plan briefing (~2s)."""
-    logger.info("POST /ai/briefing/generate")
+    logger.info(f"POST /ai/briefing/generate user={user_id[:8]}")
 
-    assignments = _fetch_active_assignments()
+    assignments = _fetch_active_assignments(user_id)
     if not assignments:
         return AIBriefingResponse(
             briefing="No active assignments found. Enjoy the free time!",
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
-    prefs = _fetch_user_preferences()
+    prefs = _fetch_user_preferences(user_id)
     try:
         briefing = ai_service.generate_briefing(assignments, prefs)
     except Exception as e:
@@ -702,7 +784,7 @@ def generate_ai_briefing():
 
 
 @app.post("/ai/chat")
-async def ai_chat(req: AIChatRequest):
+async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
     """Streaming SSE chat endpoint. Returns text/event-stream.
 
     Each SSE event: data: {"delta": "..."}\n\n
@@ -712,11 +794,11 @@ async def ai_chat(req: AIChatRequest):
     if not req.messages:
         raise HTTPException(status_code=400, detail="messages list cannot be empty")
 
-    assignments = _fetch_active_assignments()
-    prefs = _fetch_user_preferences()
+    assignments = _fetch_active_assignments(user_id)
+    prefs = _fetch_user_preferences(user_id)
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
 
-    logger.info(f"POST /ai/chat - {len(req.messages)} message(s)")
+    logger.info(f"POST /ai/chat user={user_id[:8]} - {len(req.messages)} message(s)")
 
     def event_stream():
         try:
@@ -739,7 +821,7 @@ async def ai_chat(req: AIChatRequest):
 
 
 @app.post("/ai/apply-plan")
-def ai_apply_plan(req: AIApplyPlanRequest):
+def ai_apply_plan(req: AIApplyPlanRequest, user_id: str = Depends(get_current_user)):
     """Extract a study plan from the conversation and write planned_start to assignments.
 
     Returns: {updated: N, assignments: [{id, planned_start}]}
@@ -747,9 +829,9 @@ def ai_apply_plan(req: AIApplyPlanRequest):
     if not req.messages:
         raise HTTPException(status_code=400, detail="messages list cannot be empty")
 
-    logger.info(f"POST /ai/apply-plan - {len(req.messages)} message(s)")
+    logger.info(f"POST /ai/apply-plan user={user_id[:8]} - {len(req.messages)} message(s)")
 
-    assignments = _fetch_active_assignments()
+    assignments = _fetch_active_assignments(user_id)
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
 
     try:
@@ -771,14 +853,14 @@ def ai_apply_plan(req: AIApplyPlanRequest):
         if aid not in valid_ids or not planned_start:
             continue
         try:
-            supabase.table("assignments").update(
+            supabase_service.table("assignments").update(
                 {"planned_start": planned_start}
-            ).eq("id", aid).execute()
+            ).eq("id", aid).eq("user_id", user_id).execute()
             updated.append({"id": aid, "planned_start": planned_start})
         except Exception as e:
             logger.warning(f"POST /ai/apply-plan - failed to update {aid}: {e}")
 
-    logger.info(f"POST /ai/apply-plan - updated {len(updated)} assignment(s)")
+    logger.info(f"POST /ai/apply-plan user={user_id[:8]} - updated {len(updated)} assignment(s)")
     return {"updated": len(updated), "assignments": updated}
 
 
@@ -794,20 +876,21 @@ def get_vapid_public_key():
 
 
 @app.post("/push/subscribe")
-def push_subscribe(sub: PushSubscription):
+def push_subscribe(sub: PushSubscription, user_id: str = Depends(get_current_user)):
     """Save a browser push subscription (upsert by endpoint)."""
-    logger.info(f"POST /push/subscribe - {sub.endpoint[:60]}…")
+    logger.info(f"POST /push/subscribe user={user_id[:8]} - {sub.endpoint[:60]}…")
     try:
-        existing = supabase.table("push_subscriptions").select("id").eq("endpoint", sub.endpoint).execute()
+        existing = supabase_service.table("push_subscriptions").select("id").eq("endpoint", sub.endpoint).eq("user_id", user_id).execute()
         row = {
             "endpoint": sub.endpoint,
             "p256dh": sub.keys.get("p256dh", ""),
             "auth": sub.keys.get("auth", ""),
+            "user_id": user_id,
         }
         if existing.data:
-            supabase.table("push_subscriptions").update(row).eq("endpoint", sub.endpoint).execute()
+            supabase_service.table("push_subscriptions").update(row).eq("endpoint", sub.endpoint).eq("user_id", user_id).execute()
         else:
-            supabase.table("push_subscriptions").insert(row).execute()
+            supabase_service.table("push_subscriptions").insert(row).execute()
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"POST /push/subscribe failed: {e}")
@@ -815,22 +898,22 @@ def push_subscribe(sub: PushSubscription):
 
 
 @app.delete("/push/subscribe")
-def push_unsubscribe(sub: PushSubscription):
+def push_unsubscribe(sub: PushSubscription, user_id: str = Depends(get_current_user)):
     """Remove a push subscription."""
     try:
-        supabase.table("push_subscriptions").delete().eq("endpoint", sub.endpoint).execute()
+        supabase_service.table("push_subscriptions").delete().eq("endpoint", sub.endpoint).eq("user_id", user_id).execute()
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/push/send-deadline-reminders")
-def send_deadline_reminders():
+def send_deadline_reminders(user_id: str = Depends(get_current_user)):
     """Send push notifications for assignments due within 24 hours.
 
     Called on demand or by an external cron. Only sends if subscriptions exist.
     """
-    logger.info("POST /push/send-deadline-reminders")
+    logger.info(f"POST /push/send-deadline-reminders user={user_id[:8]}")
 
     vapid_private = os.getenv("VAPID_PRIVATE_KEY", "").replace("\\n", "\n")
     vapid_public = os.getenv("VAPID_PUBLIC_KEY", "")
@@ -844,18 +927,19 @@ def send_deadline_reminders():
     except ImportError:
         raise HTTPException(status_code=503, detail="pywebpush not installed.")
 
-    # Fetch subscriptions
-    subs_res = supabase.table("push_subscriptions").select("*").execute()
+    # Fetch subscriptions for this user only
+    subs_res = supabase_service.table("push_subscriptions").select("*").eq("user_id", user_id).execute()
     subscriptions = subs_res.data or []
     if not subscriptions:
         return {"sent": 0, "message": "No subscribers."}
 
-    # Find assignments due in the next 24 hours
+    # Find assignments due in the next 24 hours for this user
     now = datetime.now(timezone.utc)
     in_24h = (now + timedelta(hours=24)).isoformat()
     due_soon = (
-        supabase.table("assignments")
+        supabase_service.table("assignments")
         .select("title, course_name, due_date")
+        .eq("user_id", user_id)
         .not_.in_("status", ["submitted", "unavailable"])
         .lte("due_date", in_24h)
         .gte("due_date", now.isoformat())
@@ -902,9 +986,9 @@ def send_deadline_reminders():
 
     # Clean up stale subscriptions
     for endpoint in stale:
-        supabase.table("push_subscriptions").delete().eq("endpoint", endpoint).execute()
+        supabase_service.table("push_subscriptions").delete().eq("endpoint", endpoint).eq("user_id", user_id).execute()
 
-    logger.info(f"POST /push/send-deadline-reminders — sent {sent}, removed {len(stale)} stale")
+    logger.info(f"POST /push/send-deadline-reminders user={user_id[:8]} — sent {sent}, removed {len(stale)} stale")
     return {"sent": sent, "removed_stale": len(stale)}
 
 

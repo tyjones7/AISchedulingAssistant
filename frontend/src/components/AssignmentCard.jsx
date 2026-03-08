@@ -198,6 +198,9 @@ function AssignmentCard({
       {/* Meta row: course + status + estimated time */}
       <div className="card-meta">
         <span className="card-course">{assignment.course_name}</span>
+        {assignment.is_extra_credit && (
+          <span className="ec-badge" title="Extra credit">EC</span>
+        )}
         {assignment.source && (
           <span className={`source-badge source-${assignment.source === 'canvas' ? 'canvas' : 'ls'}`}>
             {assignment.source === 'canvas' ? 'Canvas' : 'LS'}
