@@ -265,6 +265,9 @@ function LoginPage({ onLoginSuccess }) {
                     <p className="credentials-privacy-note">
                       🔒 Your password is sent directly to BYU's login page — the same way you'd log in yourself. It is never stored anywhere and is discarded the moment BYU confirms your identity. We only keep your BYU session cookie (not your password) to sync your assignments.
                     </p>
+                    <p className="credentials-privacy-note" style={{marginTop: '8px', opacity: 0.7}}>
+                      Using Touch ID or computer fingerprint for Duo? That can't work on a remote server. Run <code style={{fontSize: '11px', background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px'}}>python3 backend/import_ls_session.py</code> locally instead.
+                    </p>
                   </form>
                 )}
               </>

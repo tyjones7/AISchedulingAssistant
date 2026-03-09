@@ -457,10 +457,30 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
             driver = scraper.driver
             time.sleep(8)  # Duo Universal Prompt needs time for React to render
 
-            # Log all buttons found for debugging
+            # Check if Duo is embedded in an iframe (BYU sometimes embeds via iframe)
+            duo_in_iframe = False
+            if 'duo' not in current_url.lower() and 'duosecurity' not in current_url.lower():
+                try:
+                    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                    logger.info(f"Credentials login [{task_id[:8]}] - Found {len(iframes)} iframes (Duo not in URL, checking)")
+                    for iframe in iframes:
+                        src = (iframe.get_attribute("src") or "").lower()
+                        frame_id = (iframe.get_attribute("id") or "").lower()
+                        name = (iframe.get_attribute("name") or "").lower()
+                        logger.info(f"Credentials login [{task_id[:8]}] - iframe: id={frame_id!r} name={name!r} src={src[:80]!r}")
+                        if any("duo" in x for x in [src, frame_id, name]):
+                            logger.info(f"Credentials login [{task_id[:8]}] - Switching into Duo iframe")
+                            driver.switch_to.frame(iframe)
+                            duo_in_iframe = True
+                            time.sleep(3)  # Let iframe content render
+                            break
+                except Exception as e:
+                    logger.warning(f"Credentials login [{task_id[:8]}] - iframe check error: {e}")
+
+            # Log all buttons found for debugging (inside iframe context if applicable)
             try:
                 all_btns = driver.find_elements(By.TAG_NAME, "button")
-                logger.info(f"Credentials login [{task_id[:8]}] - Buttons on page ({len(all_btns)}): "
+                logger.info(f"Credentials login [{task_id[:8]}] - Buttons ({len(all_btns)}, iframe={duo_in_iframe}): "
                             + str([(b.get_attribute('data-testid'), b.text[:30], b.get_attribute('type')) for b in all_btns]))
             except Exception as e:
                 logger.warning(f"Credentials login [{task_id[:8]}] - Could not list buttons: {e}")
@@ -479,9 +499,9 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
                 "input[type='submit']",
             ]:
                 try:
-                    btn = WebDriverWait(driver, 12).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                    btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
                     logger.info(f"Credentials login [{task_id[:8]}] - Found button via CSS '{selector}' text={btn.text!r}")
-                    driver.execute_script("arguments[0].click();", btn)  # JS click bypasses overlay issues
+                    driver.execute_script("arguments[0].click();", btn)
                     push_clicked = True
                     break
                 except Exception:
@@ -489,9 +509,9 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
 
             # XPath fallback by button text
             if not push_clicked:
-                for text in ["Log in", "Send me a push", "Send Push", "Duo Push", "Push"]:
+                for text in ["Log in", "Send me a push", "Send Push", "Duo Push", "Push", "Continue"]:
                     try:
-                        btn = WebDriverWait(driver, 5).until(
+                        btn = WebDriverWait(driver, 3).until(
                             EC.element_to_be_clickable((By.XPATH, f"//button[contains(normalize-space(),'{text}')]"))
                         )
                         logger.info(f"Credentials login [{task_id[:8]}] - Found button by text {text!r}, clicking")
@@ -506,9 +526,16 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
             # Log page source AFTER clicking
             try:
                 time.sleep(2)
-                logger.info(f"Credentials login [{task_id[:8]}] - POST-CLICK (first 1000): {driver.page_source[:1000]}")
+                logger.info(f"Credentials login [{task_id[:8]}] - POST-CLICK page (first 1000): {driver.page_source[:1000]}")
             except Exception:
                 pass
+
+            # Switch back to main document context if we were in an iframe
+            if duo_in_iframe:
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
 
             auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_MFA)
 
@@ -516,6 +543,11 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
             for _ in range(90):
                 time.sleep(2)
                 try:
+                    if duo_in_iframe:
+                        try:
+                            driver.switch_to.default_content()
+                        except Exception:
+                            pass
                     current_url = driver.current_url
                     if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
                         logger.info(f"Credentials login [{task_id[:8]}] - Login successful after approval!")
@@ -560,6 +592,27 @@ def submit_duo_passcode(task_id: str, req: DuoPasscodeRequest, user_id: str = De
     auth_store.set_duo_passcode(task_id, code)
     logger.info(f"POST /auth/ls-duo-passcode task={task_id[:8]} - Passcode received")
     return {"success": True}
+
+
+class ImportSessionRequest(BaseModel):
+    cookies: list
+    base_url: str
+
+
+@app.post("/auth/import-ls-session")
+def import_ls_session(req: ImportSessionRequest, user_id: str = Depends(get_current_user)):
+    """Import a Learning Suite session captured from a local browser.
+
+    Used by the import_ls_session.py helper script for users whose Duo MFA
+    method (e.g. Touch ID / WebAuthn) cannot work in headless Chrome on the server.
+    The script opens a visible Chrome window on the user's machine, lets them log in
+    normally, then posts the resulting cookies here.
+    """
+    if not req.cookies or not req.base_url:
+        raise HTTPException(status_code=400, detail="cookies and base_url are required")
+    auth_store.set_session_data(user_id, req.cookies, req.base_url)
+    logger.info(f"POST /auth/import-ls-session user={user_id[:8]} - Imported {len(req.cookies)} cookies, base_url={req.base_url[:60]}")
+    return {"success": True, "message": "Session imported successfully"}
 
 
 @app.get("/auth/browser-status/{task_id}")
