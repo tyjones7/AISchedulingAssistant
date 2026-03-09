@@ -95,8 +95,9 @@ function LoginPage({ onLoginSuccess }) {
       })
 
       if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.detail || 'Failed to start login')
+        let msg = 'Failed to start login'
+        try { const d = await response.json(); msg = d.detail || msg } catch {}
+        throw new Error(msg)
       }
 
       const data = await response.json()

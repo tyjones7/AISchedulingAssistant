@@ -176,30 +176,19 @@ app.add_middleware(
 # ============== JWT AUTH DEPENDENCY ==============
 
 async def get_current_user(authorization: str = Header(None)) -> str:
-    """Verify Supabase JWT and return the user_id (sub claim)."""
+    """Verify Supabase JWT and return the user_id using Supabase's auth API."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
     token = authorization.split(" ", 1)[1]
-    if not SUPABASE_JWT_SECRET:
-        raise HTTPException(
-            status_code=503,
-            detail="SUPABASE_JWT_SECRET not configured — cannot verify tokens",
-        )
     try:
-        payload = pyjwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token: missing sub claim")
-        return user_id
-    except pyjwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired — please sign in again")
-    except pyjwt.InvalidTokenError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+        response = supabase.auth.get_user(token)
+        if not response.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return response.user.id
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {e}")
 
 
 @app.get("/")
