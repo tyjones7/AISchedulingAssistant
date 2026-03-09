@@ -453,45 +453,60 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
                 time.sleep(3)
                 waited += 3
 
-            # Duo page detected — try every known button selector to trigger push
+            # Duo page detected — wait for React to fully render, then click push button
             driver = scraper.driver
-            time.sleep(3)  # let page fully render
+            time.sleep(8)  # Duo Universal Prompt needs time for React to render
+
+            # Log all buttons found for debugging
+            try:
+                all_btns = driver.find_elements(By.TAG_NAME, "button")
+                logger.info(f"Credentials login [{task_id[:8]}] - Buttons on page ({len(all_btns)}): "
+                            + str([(b.get_attribute('data-testid'), b.text[:30], b.get_attribute('type')) for b in all_btns]))
+            except Exception as e:
+                logger.warning(f"Credentials login [{task_id[:8]}] - Could not list buttons: {e}")
 
             push_clicked = False
+
+            # CSS selectors (Duo Universal Prompt OIDC / frameless)
             for selector in [
                 "button[data-testid='primary-button']",
+                "button[data-testid='send-push']",
                 "button[data-action='primary']",
                 "button.btn-primary",
+                "button.base-button--type-primary",
                 "#login-btn",
-                "input[type='submit']",
                 "button[type='submit']",
+                "input[type='submit']",
             ]:
                 try:
-                    btn = WebDriverWait(driver, 4).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                    logger.info(f"Credentials login [{task_id[:8]}] - Clicking Duo button: {selector} text={btn.text!r}")
-                    btn.click()
+                    btn = WebDriverWait(driver, 12).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                    logger.info(f"Credentials login [{task_id[:8]}] - Found button via CSS '{selector}' text={btn.text!r}")
+                    driver.execute_script("arguments[0].click();", btn)  # JS click bypasses overlay issues
                     push_clicked = True
                     break
                 except Exception:
                     pass
 
-            # Also try XPath for buttons with push-related text
+            # XPath fallback by button text
             if not push_clicked:
-                for text in ["Log in", "Send me a push", "Send Push", "Duo Push"]:
+                for text in ["Log in", "Send me a push", "Send Push", "Duo Push", "Push"]:
                     try:
-                        btn = driver.find_element(By.XPATH, f"//button[contains(.,'{text}')]")
-                        logger.info(f"Credentials login [{task_id[:8]}] - Clicking Duo button by text: {text!r}")
-                        btn.click()
+                        btn = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, f"//button[contains(normalize-space(),'{text}')]"))
+                        )
+                        logger.info(f"Credentials login [{task_id[:8]}] - Found button by text {text!r}, clicking")
+                        driver.execute_script("arguments[0].click();", btn)
                         push_clicked = True
                         break
                     except Exception:
                         pass
 
-            logger.info(f"Credentials login [{task_id[:8]}] - push_clicked={push_clicked}, now waiting for BYU app approval")
+            logger.info(f"Credentials login [{task_id[:8]}] - push_clicked={push_clicked}")
 
-            # Log page source AFTER clicking so we can see what changed
+            # Log page source AFTER clicking
             try:
-                logger.info(f"Credentials login [{task_id[:8]}] - POST-CLICK PAGE SOURCE (first 1500): {driver.page_source[:1500]}")
+                time.sleep(2)
+                logger.info(f"Credentials login [{task_id[:8]}] - POST-CLICK (first 1000): {driver.page_source[:1000]}")
             except Exception:
                 pass
 
