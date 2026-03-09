@@ -1,9 +1,13 @@
 import os
 import json
 import logging
-from fastapi import FastAPI, HTTPException, Query, Header, Depends
+import uuid as _uuid
+import xml.etree.ElementTree as ET
+import urllib.parse
+import time
+from fastapi import FastAPI, HTTPException, Query, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
 from datetime import datetime, timedelta, timezone
@@ -146,6 +150,13 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Service-role client — bypasses RLS; used for all backend DB operations
 supabase_service = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY) if SUPABASE_SERVICE_KEY else supabase
+
+# CAS redirect login state
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
+CAS_BASE = "https://cas.byu.edu/cas"
+LS_BASE = "https://learningsuite.byu.edu"
+_cas_states: dict = {}   # state_token → {user_id, task_id, service_url}
+_pgt_store: dict = {}    # pgtiou → pgt_id
 
 app = FastAPI(title="AI Scheduling Assistant API", version="1.0.0")
 
@@ -530,6 +541,209 @@ def delete_canvas_token(user_id: str = Depends(get_current_user)):
     canvas_auth_store.clear_token(user_id)
     logger.info(f"DELETE /auth/canvas-token user={user_id[:8]}")
     return {"success": True}
+
+
+# ============== BYU CAS REDIRECT LOGIN ==============
+
+@app.post("/auth/byu-login-start")
+def byu_login_start(user_id: str = Depends(get_current_user)):
+    """Create a CAS login URL and return it for the frontend to open in a new tab.
+
+    The user is redirected to BYU's real CAS login page in a new tab. After they
+    authenticate, BYU redirects their browser to our /auth/cas-callback endpoint,
+    which uses a CAS proxy ticket to establish a server-side LS session.
+    """
+    state = str(_uuid.uuid4())
+    task_id = auth_store.create_browser_auth_task()
+
+    service_url = f"{BACKEND_URL}/auth/cas-callback?state={state}"
+    pgt_url = f"{BACKEND_URL}/auth/cas-pgt"
+
+    _cas_states[state] = {
+        "user_id": user_id,
+        "task_id": task_id,
+        "service_url": service_url,
+    }
+
+    cas_url = (
+        f"{CAS_BASE}/login"
+        f"?service={urllib.parse.quote(service_url, safe='')}"
+        f"&pgtUrl={urllib.parse.quote(pgt_url, safe='')}"
+    )
+
+    logger.info(f"POST /auth/byu-login-start user={user_id[:8]} state={state[:8]} task={task_id[:8]}")
+    return {"task_id": task_id, "cas_url": cas_url}
+
+
+@app.get("/auth/cas-pgt")
+def cas_pgt_callback(pgtId: str = Query(None), pgtIou: str = Query(None)):
+    """Called by BYU's CAS server (not the browser) to deliver a Proxy Granting Ticket.
+
+    CAS calls this endpoint with pgtId (the actual PGT) and pgtIou (a correlation ID)
+    as query parameters immediately after validating the service ticket. We store
+    the pgtId keyed by pgtIou so the callback handler can look it up.
+    """
+    if pgtId and pgtIou:
+        _pgt_store[pgtIou] = pgtId
+        logger.info(f"CAS PGT callback: stored PGT for pgtIou {pgtIou[:16]}...")
+    # CAS requires HTTP 200 with any body to confirm receipt
+    return {"status": "ok"}
+
+
+@app.get("/auth/cas-callback")
+def cas_callback(ticket: str = Query(None), state: str = Query(None)):
+    """BYU CAS redirects the user's browser here after successful authentication.
+
+    1. Validates the service ticket via CAS proxyValidate (also triggers PGT delivery)
+    2. Waits for the PGT to arrive via /auth/cas-pgt
+    3. Requests a proxy ticket for Learning Suite
+    4. Uses the proxy ticket to establish an LS session (server-to-server)
+    5. Stores cookies in auth_store and returns a success page that auto-closes
+    """
+    import re
+    import requests as _req
+
+    def _page(title: str, body: str, auto_close: bool = False, is_error: bool = False):
+        color = "#dc2626" if is_error else "#4ade80"
+        icon = "✗" if is_error else "✓"
+        close_script = "<script>setTimeout(function(){window.close();},2000);</script>" if auto_close else ""
+        return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>CampusAI</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0f172a;color:#f8fafc">
+<div style="text-align:center;max-width:420px;padding:2rem">
+  <div style="font-size:3rem;margin-bottom:1rem;color:{color}">{icon}</div>
+  <p style="font-size:1.2rem;font-weight:600;margin:0 0 0.5rem">{title}</p>
+  <p style="color:#94a3b8;font-size:0.875rem;margin:0">{body}</p>
+</div>{close_script}</body></html>""")
+
+    if not ticket or not state:
+        return _page("Invalid Request", "Missing ticket or state. Please close this tab and try again.", is_error=True)
+
+    state_data = _cas_states.get(state)
+    if not state_data:
+        return _page("Session Expired", "This login session has expired. Please close this tab and try again.", is_error=True)
+
+    user_id = state_data["user_id"]
+    task_id = state_data["task_id"]
+    service_url = state_data["service_url"]
+    pgt_url = f"{BACKEND_URL}/auth/cas-pgt"
+    ns = {"cas": "http://www.yale.edu/tp/cas"}
+
+    # Step 1 — Validate service ticket with CAS proxyValidate
+    validate_url = (
+        f"{CAS_BASE}/proxyValidate"
+        f"?service={urllib.parse.quote(service_url, safe='')}"
+        f"&ticket={urllib.parse.quote(ticket, safe='')}"
+        f"&pgtUrl={urllib.parse.quote(pgt_url, safe='')}"
+    )
+    try:
+        cas_resp = _req.get(validate_url, timeout=15)
+        root = ET.fromstring(cas_resp.text)
+        logger.info(f"CAS proxyValidate response (first 400 chars): {cas_resp.text[:400]}")
+    except Exception as e:
+        logger.error(f"CAS validate request failed: {e}")
+        auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.FAILED, str(e))
+        return _page("CAS Error", f"Could not reach BYU CAS: {e}", is_error=True)
+
+    success_el = root.find(".//cas:authenticationSuccess", ns)
+    if success_el is None:
+        fail_el = root.find(".//cas:authenticationFailure", ns)
+        msg = (fail_el.text or "").strip() if fail_el is not None else "Authentication failed"
+        auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.FAILED, msg)
+        logger.error(f"CAS authentication failed: {msg}")
+        return _page("Login Failed", msg, is_error=True)
+
+    # Step 2 — Wait up to 5 seconds for PGT to arrive via /auth/cas-pgt
+    pgtiou_el = success_el.find("cas:proxyGrantingTicket", ns)
+    pgtiou = pgtiou_el.text.strip() if pgtiou_el is not None else None
+
+    pgt_id = None
+    if pgtiou:
+        for _ in range(10):
+            pgt_id = _pgt_store.get(pgtiou)
+            if pgt_id:
+                break
+            time.sleep(0.5)
+
+    if not pgt_id:
+        logger.warning(f"No PGT received (pgtiou={'present' if pgtiou else 'absent'}) — proxy tickets unavailable")
+        auth_store.update_browser_auth_status(
+            task_id, auth_store.BrowserAuthStatus.FAILED,
+            "CAS proxy tickets unavailable for this service. Contact support."
+        )
+        return _page(
+            "Configuration Required",
+            "BYU CAS proxy tickets are not enabled for this app. Please contact support.",
+            is_error=True
+        )
+
+    # Step 3 — Request a proxy ticket for Learning Suite
+    proxy_url = (
+        f"{CAS_BASE}/proxy"
+        f"?targetService={urllib.parse.quote(LS_BASE, safe='')}"
+        f"&pgt={urllib.parse.quote(pgt_id, safe='')}"
+    )
+    try:
+        proxy_resp = _req.get(proxy_url, timeout=15)
+        proxy_root = ET.fromstring(proxy_resp.text)
+        logger.info(f"CAS proxy response: {proxy_resp.text[:400]}")
+        pt_el = proxy_root.find(".//cas:proxyTicket", ns)
+        pt = pt_el.text.strip() if pt_el is not None else None
+    except Exception as e:
+        logger.error(f"CAS proxy ticket request failed: {e}")
+        auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.FAILED, str(e))
+        return _page("Proxy Ticket Failed", f"Could not get Learning Suite access token: {e}", is_error=True)
+
+    if not pt:
+        auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.FAILED, "No proxy ticket in CAS response")
+        return _page("Proxy Ticket Failed", "CAS did not return a proxy ticket for Learning Suite.", is_error=True)
+
+    # Step 4 — Use proxy ticket to establish an LS session (server-to-server)
+    session = _req.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"})
+    try:
+        ls_resp = session.get(
+            f"{LS_BASE}/",
+            params={"ticket": pt},
+            allow_redirects=True,
+            timeout=20,
+        )
+        final_url = ls_resp.url
+        logger.info(f"LS CAS auth: status={ls_resp.status_code} final_url={final_url}")
+
+        if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', final_url):
+            cookies_list = [
+                {
+                    "name": c.name,
+                    "value": c.value,
+                    "domain": c.domain or ".learningsuite.byu.edu",
+                    "path": c.path or "/",
+                    "secure": c.secure,
+                }
+                for c in session.cookies
+            ]
+            auth_store.set_session_data(user_id, cookies_list, final_url.rstrip("/"))
+            auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.AUTHENTICATED)
+            _cas_states.pop(state, None)
+            _pgt_store.pop(pgtiou, None)
+            logger.info(f"CAS login succeeded for user={user_id[:8]} — {len(cookies_list)} cookies stored")
+            return _page(
+                "Connected to Learning Suite!",
+                "You're signed in. This tab will close automatically.",
+                auto_close=True
+            )
+        else:
+            logger.error(f"LS CAS auth ended at unexpected URL: {final_url}")
+            auth_store.update_browser_auth_status(
+                task_id, auth_store.BrowserAuthStatus.FAILED,
+                f"LS redirect ended at unexpected URL: {final_url}"
+            )
+            return _page("Connection Failed", "Could not establish a Learning Suite session. Please try again.", is_error=True)
+
+    except Exception as e:
+        logger.error(f"LS session establishment failed: {e}")
+        auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.FAILED, str(e))
+        return _page("Connection Failed", f"Error connecting to Learning Suite: {e}", is_error=True)
 
 
 @app.get("/assignments")

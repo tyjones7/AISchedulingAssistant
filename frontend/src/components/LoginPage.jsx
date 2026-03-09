@@ -17,10 +17,6 @@ function LoginPage({ onLoginSuccess }) {
   const [canvasUser, setCanvasUser] = useState(null)
   const [canvasError, setCanvasError] = useState(null)
 
-  // LS credentials form
-  const [netid, setNetid] = useState('')
-  const [password, setPassword] = useState('')
-
   // LS connected state
   const [lsConnected, setLsConnected] = useState(false)
 
@@ -88,18 +84,14 @@ function LoginPage({ onLoginSuccess }) {
     return () => clearInterval(interval)
   }, [taskId, loading])
 
-  const handleBYULogin = async (e) => {
-    e.preventDefault()
-    if (!netid.trim() || !password) return
-
+  const handleBYULogin = async () => {
     setLoading(true)
     setError(null)
     setStatus('opening')
 
     try {
-      const response = await authFetch(`${API_BASE}/auth/ls-credentials`, {
+      const response = await authFetch(`${API_BASE}/auth/byu-login-start`, {
         method: 'POST',
-        body: JSON.stringify({ netid: netid.trim(), password }),
       })
 
       if (!response.ok) {
@@ -108,9 +100,11 @@ function LoginPage({ onLoginSuccess }) {
       }
 
       const data = await response.json()
-      setPassword('') // clear password from state immediately
       setTaskId(data.task_id)
-      setStatus('waiting_for_mfa')
+      setStatus('waiting_for_login')
+
+      // Open BYU's real CAS login page in a new tab
+      window.open(data.cas_url, '_blank', 'noopener,noreferrer')
     } catch (err) {
       console.error('[LoginPage] Login error:', err)
       setError(err.message || 'Failed to connect to server')
@@ -156,11 +150,11 @@ function LoginPage({ onLoginSuccess }) {
   const getStatusMessage = () => {
     switch (status) {
       case 'opening':
-        return 'Opening browser...'
+        return 'Opening BYU login...'
       case 'waiting_for_login':
-        return 'Complete login in the browser window...'
+        return 'Sign in on the BYU tab that just opened...'
       case 'waiting_for_mfa':
-        return 'Complete Duo MFA in the browser...'
+        return 'Complete Duo MFA in the new tab...'
       case 'authenticated':
         return 'Login successful!'
       default:
@@ -210,46 +204,19 @@ function LoginPage({ onLoginSuccess }) {
                       <span className="status-spinner" />
                     )}
                     <span className="status-message">{getStatusMessage()}</span>
-                    {status === 'waiting_for_mfa' && (
-                      <p className="duo-hint">Check your phone for a Duo push notification and approve it.</p>
+                    {status === 'waiting_for_login' && (
+                      <p className="duo-hint">A new tab opened to BYU's login page. Sign in there — this page will update automatically.</p>
                     )}
                   </div>
                 ) : (
-                  <form className="ls-credentials-form" onSubmit={handleBYULogin}>
-                    <div className="ls-field">
-                      <label className="ls-label" htmlFor="byu-netid">BYU NetID</label>
-                      <input
-                        id="byu-netid"
-                        type="text"
-                        className="ls-input"
-                        placeholder="e.g. tjones42"
-                        value={netid}
-                        onChange={(e) => setNetid(e.target.value)}
-                        autoComplete="username"
-                        required
-                      />
-                    </div>
-                    <div className="ls-field">
-                      <label className="ls-label" htmlFor="byu-password">BYU Password</label>
-                      <input
-                        id="byu-password"
-                        type="password"
-                        className="ls-input"
-                        placeholder="Your BYU password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        autoComplete="current-password"
-                        required
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="byu-login-button"
-                      disabled={!netid.trim() || !password}
-                    >
-                      Connect Learning Suite
-                    </button>
-                  </form>
+                  <button
+                    type="button"
+                    className="byu-login-button"
+                    onClick={handleBYULogin}
+                    disabled={loading}
+                  >
+                    Sign in with BYU
+                  </button>
                 )}
               </>
             )}
