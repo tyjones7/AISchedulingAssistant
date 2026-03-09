@@ -445,105 +445,48 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
                 time.sleep(2)
                 waited += 2
 
-            # On Duo page (or timed out waiting) — switch to passcode mode
+            # On Duo page — auto-click the push button then wait for BYU app approval
             if on_duo_page or waited >= max_wait:
-                logger.info(f"Credentials login [{task_id[:8]}] - Duo page detected, requesting passcode from user")
-                auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_DUO_PASSCODE)
+                logger.info(f"Credentials login [{task_id[:8]}] - Duo page detected, attempting to trigger push")
+                driver = scraper.driver
+                time.sleep(2)  # let Duo fully load
 
-                # Block until the user submits their passcode (up to 5 minutes)
-                passcode = auth_store.wait_for_duo_passcode(task_id, timeout=300)
+                # Try to click the "Log in" / "Send me a push" button in Duo Universal Prompt
+                push_clicked = False
+                for selector in [
+                    "button[data-testid='primary-button']",
+                    "button[data-action='primary']",
+                    "button.btn-primary",
+                    "button[type='submit']",
+                ]:
+                    try:
+                        btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                        btn.click()
+                        push_clicked = True
+                        logger.info(f"Credentials login [{task_id[:8]}] - Clicked Duo push button ({selector})")
+                        break
+                    except Exception:
+                        pass
 
-                if not passcode:
-                    scraper.close()
-                    auth_store.update_browser_auth_status(
-                        task_id, auth_store.BrowserAuthStatus.FAILED,
-                        "Timed out waiting for Duo passcode."
-                    )
-                    return
+                if not push_clicked:
+                    logger.warning(f"Credentials login [{task_id[:8]}] - Could not find Duo push button, will still wait")
 
-                logger.info(f"Credentials login [{task_id[:8]}] - Got passcode, entering in Duo...")
+                # Tell the frontend to show "Check your BYU app"
+                auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_MFA)
 
-                # Navigate Duo UI to passcode entry
-                try:
-                    driver = scraper.driver
-                    time.sleep(1)
-
-                    # Try clicking "Other options" or "Use a passcode"
-                    for xpath in [
-                        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'other option')]",
-                        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'passcode')]",
-                        "//*[@data-testid='other-options-link']",
-                    ]:
-                        try:
-                            el = driver.find_element(By.XPATH, xpath)
-                            el.click()
-                            time.sleep(1)
-                            break
-                        except Exception:
-                            pass
-
-                    # Find and fill passcode input
-                    passcode_input = None
-                    for selector in [
-                        "input[data-testid='passcode-input']",
-                        "input[name='passcode']",
-                        "input[type='tel']",
-                        "input[type='text']",
-                    ]:
-                        try:
-                            passcode_input = WebDriverWait(driver, 5).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                            )
-                            break
-                        except Exception:
-                            pass
-
-                    if passcode_input:
-                        passcode_input.clear()
-                        passcode_input.send_keys(passcode)
-                        time.sleep(0.5)
-                        # Submit
-                        for btn_selector in [
-                            "button[data-testid='passcode-submit']",
-                            "button[type='submit']",
-                        ]:
-                            try:
-                                driver.find_element(By.CSS_SELECTOR, btn_selector).click()
-                                break
-                            except Exception:
-                                pass
-                        else:
-                            passcode_input.submit()
-                    else:
-                        logger.error(f"Credentials login [{task_id[:8]}] - Could not find Duo passcode input")
-                        scraper.close()
-                        auth_store.update_browser_auth_status(
-                            task_id, auth_store.BrowserAuthStatus.FAILED,
-                            "Could not find Duo passcode input. Please try again."
-                        )
-                        return
-
-                except Exception as e:
-                    logger.error(f"Credentials login [{task_id[:8]}] - Duo passcode entry failed: {e}")
-                    scraper.close()
-                    auth_store.update_browser_auth_status(
-                        task_id, auth_store.BrowserAuthStatus.FAILED, str(e)
-                    )
-                    return
-
-                # Wait for redirect to LS after passcode entry
-                for _ in range(60):
+                # Wait up to 3 minutes for the user to approve in the BYU app
+                for _ in range(90):
                     time.sleep(2)
-                    current_url = scraper.driver.current_url
+                    current_url = driver.current_url
                     if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
-                        logger.info(f"Credentials login [{task_id[:8]}] - Login successful (passcode)!")
+                        logger.info(f"Credentials login [{task_id[:8]}] - Login successful (push approved)!")
                         _capture_and_finish()
                         return
 
                 scraper.close()
                 auth_store.update_browser_auth_status(
                     task_id, auth_store.BrowserAuthStatus.FAILED,
-                    "Passcode was incorrect or login timed out. Please try again."
+                    "Timed out waiting for BYU app approval. Please try again."
                 )
 
         except Exception as e:

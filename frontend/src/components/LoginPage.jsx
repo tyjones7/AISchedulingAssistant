@@ -176,8 +176,7 @@ function LoginPage({ onLoginSuccess }) {
     switch (status) {
       case 'opening': return 'Opening browser...'
       case 'waiting_for_login': return 'Logging in to BYU...'
-      case 'waiting_for_mfa': return 'Waiting for Duo...'
-      case 'waiting_for_duo_passcode': return 'Enter your Duo passcode'
+      case 'waiting_for_mfa': return 'Check your BYU app and approve the login request'
       case 'authenticated': return 'Login successful!'
       default: return 'Connecting...'
     }
@@ -227,36 +226,6 @@ function LoginPage({ onLoginSuccess }) {
                     <span className="status-message">{getStatusMessage()}</span>
                   </div>
                 ) : null}
-
-                {status === 'waiting_for_duo_passcode' && (
-                  <form className="ls-credentials-form" onSubmit={handleDuoSubmit}>
-                    <p className="duo-hint" style={{marginTop: 0}}>
-                      Open your <strong>Duo Mobile</strong> app → tap <strong>Show</strong> next to your BYU account → enter the 6-digit passcode below.
-                    </p>
-                    <div className="ls-field">
-                      <label className="ls-label" htmlFor="duo-code">Duo Passcode</label>
-                      <input
-                        id="duo-code"
-                        type="text"
-                        inputMode="numeric"
-                        className="ls-input"
-                        placeholder="123456"
-                        value={duoCode}
-                        onChange={(e) => setDuoCode(e.target.value)}
-                        maxLength={6}
-                        autoFocus
-                        required
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="byu-login-button"
-                      disabled={duoCode.trim().length < 6 || duoSubmitting}
-                    >
-                      {duoSubmitting ? 'Submitting...' : 'Submit Passcode'}
-                    </button>
-                  </form>
-                )}
 
                 {!loading && !status && (
                   <form className="ls-credentials-form" onSubmit={handleBYULogin}>
