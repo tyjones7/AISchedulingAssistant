@@ -151,6 +151,7 @@ function AssignmentCard({
 
   const canMarkStarted = ['newly_assigned', 'not_started'].includes(assignment.status)
   const canMarkDone = ['newly_assigned', 'not_started', 'in_progress'].includes(assignment.status)
+  const showAlreadySubmitted = isPastDue && ['newly_assigned', 'not_started', 'in_progress'].includes(assignment.status)
 
   // AI suggested start pill
   const getSuggestedStartInfo = (s) => {
@@ -200,6 +201,9 @@ function AssignmentCard({
         <span className="card-course">{assignment.course_name}</span>
         {assignment.is_extra_credit && (
           <span className="ec-badge" title="Extra credit">EC</span>
+        )}
+        {assignment.point_value != null && (
+          <span className="card-points">{assignment.point_value} pts</span>
         )}
         {assignment.source && (
           <span className={`source-badge source-${assignment.source === 'canvas' ? 'canvas' : 'ls'}`}>
@@ -291,7 +295,7 @@ function AssignmentCard({
             </button>
           )}
 
-          {canMarkDone && onMarkDone && (
+          {canMarkDone && onMarkDone && !showAlreadySubmitted && (
             <button
               className="quick-action-btn action-done"
               onClick={(e) => {
@@ -305,6 +309,23 @@ function AssignmentCard({
                 <polyline points="20 6 9 17 4 12" />
               </svg>
               <span>Done</span>
+            </button>
+          )}
+
+          {showAlreadySubmitted && onMarkDone && (
+            <button
+              className="quick-action-btn action-submitted"
+              onClick={(e) => {
+                e.stopPropagation()
+                onMarkDone(assignment.id)
+              }}
+              disabled={isUpdating}
+              title="Mark as submitted"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>Already submitted?</span>
             </button>
           )}
         </div>

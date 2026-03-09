@@ -48,6 +48,14 @@ function App() {
   const [preferences, setPreferences] = useState(null)   // null = not yet loaded
   const [showSurvey, setShowSurvey] = useState(false)
 
+  // Keep-alive ping every 14 minutes to prevent Render free tier from sleeping
+  useEffect(() => {
+    const ping = () => fetch(`${API_BASE}/ping`).catch(() => {})
+    ping()
+    const interval = setInterval(ping, 14 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
+
   // On mount: check existing Supabase session and subscribe to auth changes
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: initialSession } }) => {

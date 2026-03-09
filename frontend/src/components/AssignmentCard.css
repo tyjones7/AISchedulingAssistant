@@ -215,6 +215,13 @@
   color: #fb923c;
 }
 
+/* Point value */
+.card-points {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+}
+
 /* Estimated time */
 .card-estimate {
   font-size: 11px;
@@ -341,6 +348,16 @@
 
 .quick-action-btn.action-done:hover:not(:disabled) {
   background: var(--color-status-success-bg);
+}
+
+.quick-action-btn.action-submitted {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.quick-action-btn.action-submitted:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
 }
 
 /* ============================================
