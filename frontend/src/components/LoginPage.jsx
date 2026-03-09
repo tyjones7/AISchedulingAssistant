@@ -17,6 +17,9 @@ function LoginPage({ onLoginSuccess }) {
   const [canvasUser, setCanvasUser] = useState(null)
   const [canvasError, setCanvasError] = useState(null)
 
+  const [netid, setNetid] = useState('')
+  const [password, setPassword] = useState('')
+
   // LS connected state
   const [lsConnected, setLsConnected] = useState(false)
 
@@ -84,14 +87,18 @@ function LoginPage({ onLoginSuccess }) {
     return () => clearInterval(interval)
   }, [taskId, loading])
 
-  const handleBYULogin = async () => {
+  const handleBYULogin = async (e) => {
+    e.preventDefault()
+    if (!netid.trim() || !password) return
+
     setLoading(true)
     setError(null)
     setStatus('opening')
 
     try {
-      const response = await authFetch(`${API_BASE}/auth/byu-login-start`, {
+      const response = await authFetch(`${API_BASE}/auth/ls-credentials`, {
         method: 'POST',
+        body: JSON.stringify({ netid: netid.trim(), password }),
       })
 
       if (!response.ok) {
@@ -101,11 +108,9 @@ function LoginPage({ onLoginSuccess }) {
       }
 
       const data = await response.json()
+      setPassword('')
       setTaskId(data.task_id)
-      setStatus('waiting_for_login')
-
-      // Open BYU's real CAS login page in a new tab
-      window.open(data.cas_url, '_blank', 'noopener,noreferrer')
+      setStatus('waiting_for_mfa')
     } catch (err) {
       console.error('[LoginPage] Login error:', err)
       setError(err.message || 'Failed to connect to server')
@@ -205,19 +210,49 @@ function LoginPage({ onLoginSuccess }) {
                       <span className="status-spinner" />
                     )}
                     <span className="status-message">{getStatusMessage()}</span>
-                    {status === 'waiting_for_login' && (
-                      <p className="duo-hint">A new tab opened to BYU's login page. Sign in there — this page will update automatically.</p>
+                    {status === 'waiting_for_mfa' && (
+                      <p className="duo-hint">Check your phone for a Duo push and approve it.</p>
                     )}
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    className="byu-login-button"
-                    onClick={handleBYULogin}
-                    disabled={loading}
-                  >
-                    Sign in with BYU
-                  </button>
+                  <form className="ls-credentials-form" onSubmit={handleBYULogin}>
+                    <div className="ls-field">
+                      <label className="ls-label" htmlFor="byu-netid">BYU NetID</label>
+                      <input
+                        id="byu-netid"
+                        type="text"
+                        className="ls-input"
+                        placeholder="e.g. tjones42"
+                        value={netid}
+                        onChange={(e) => setNetid(e.target.value)}
+                        autoComplete="username"
+                        required
+                      />
+                    </div>
+                    <div className="ls-field">
+                      <label className="ls-label" htmlFor="byu-password">BYU Password</label>
+                      <input
+                        id="byu-password"
+                        type="password"
+                        className="ls-input"
+                        placeholder="Your BYU password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="current-password"
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="byu-login-button"
+                      disabled={!netid.trim() || !password}
+                    >
+                      Connect Learning Suite
+                    </button>
+                    <p className="credentials-privacy-note">
+                      🔒 Your password is sent directly to BYU's login page — the same way you'd log in yourself. It is never stored anywhere and is discarded the moment BYU confirms your identity. We only keep your BYU session cookie (not your password) to sync your assignments.
+                    </p>
+                  </form>
                 )}
               </>
             )}
