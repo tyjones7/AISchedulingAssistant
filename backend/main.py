@@ -385,48 +385,54 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
 
             password_field.submit()
 
-            # Now waiting for Duo MFA — push is sent automatically to registered device
+            # Submitted credentials — now wait for Duo
             auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_MFA)
-            logger.info(f"Credentials login [{task_id[:8]}] - Credentials submitted, waiting for Duo...")
+            logger.info(f"Credentials login [{task_id[:8]}] - Credentials submitted, monitoring for Duo...")
 
-            # Wait up to 2 minutes for Duo approval + redirect back to LS
-            max_wait = 120
+            def _capture_and_finish():
+                """Extract cookies from the current LS session and mark auth complete."""
+                dynamic_base_url = scraper._extract_dynamic_base_url()
+                cookies = scraper.driver.get_cookies()
+                local_storage, session_storage = {}, {}
+                try:
+                    local_storage = scraper.driver.execute_script(
+                        "var items = {}; for (var i = 0; i < localStorage.length; i++) {"
+                        " var k = localStorage.key(i); items[k] = localStorage.getItem(k); } return items;"
+                    ) or {}
+                except Exception:
+                    pass
+                try:
+                    session_storage = scraper.driver.execute_script(
+                        "var items = {}; for (var i = 0; i < sessionStorage.length; i++) {"
+                        " var k = sessionStorage.key(i); items[k] = sessionStorage.getItem(k); } return items;"
+                    ) or {}
+                except Exception:
+                    pass
+                auth_store.set_session_data(user_id, cookies, dynamic_base_url)
+                auth_store.set_web_storage(user_id, local_storage, session_storage)
+                scraper.close()
+                auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.AUTHENTICATED)
+
+            max_wait = 30  # seconds to wait before switching to passcode mode
             waited = 0
+            on_duo_page = False
+
             while waited < max_wait:
                 current_url = scraper.driver.current_url
 
                 if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
-                    logger.info(f"Credentials login [{task_id[:8]}] - Login successful!")
-                    dynamic_base_url = scraper._extract_dynamic_base_url()
-                    cookies = scraper.driver.get_cookies()
-
-                    local_storage = {}
-                    session_storage = {}
-                    try:
-                        local_storage = scraper.driver.execute_script(
-                            "var items = {}; for (var i = 0; i < localStorage.length; i++) {"
-                            " var k = localStorage.key(i); items[k] = localStorage.getItem(k); } return items;"
-                        ) or {}
-                    except Exception:
-                        pass
-                    try:
-                        session_storage = scraper.driver.execute_script(
-                            "var items = {}; for (var i = 0; i < sessionStorage.length; i++) {"
-                            " var k = sessionStorage.key(i); items[k] = sessionStorage.getItem(k); } return items;"
-                        ) or {}
-                    except Exception:
-                        pass
-
-                    auth_store.set_session_data(user_id, cookies, dynamic_base_url)
-                    auth_store.set_web_storage(user_id, local_storage, session_storage)
-                    scraper.close()
-                    auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.AUTHENTICATED)
+                    logger.info(f"Credentials login [{task_id[:8]}] - Login successful (push approved)!")
+                    _capture_and_finish()
                     return
 
-                # Check for wrong password / CAS error
+                if 'duo' in current_url.lower() or 'duosecurity' in current_url.lower():
+                    on_duo_page = True
+                    break
+
+                # Check for wrong password
                 try:
                     page_src = scraper.driver.page_source.lower()
-                    if "invalid credentials" in page_src or "incorrect" in page_src or "failed" in page_src:
+                    if "invalid credentials" in page_src or "incorrect" in page_src:
                         scraper.close()
                         auth_store.update_browser_auth_status(
                             task_id, auth_store.BrowserAuthStatus.FAILED,
@@ -439,11 +445,106 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
                 time.sleep(2)
                 waited += 2
 
-            scraper.close()
-            auth_store.update_browser_auth_status(
-                task_id, auth_store.BrowserAuthStatus.FAILED,
-                "Timed out waiting for Duo approval. Please try again."
-            )
+            # On Duo page (or timed out waiting) — switch to passcode mode
+            if on_duo_page or waited >= max_wait:
+                logger.info(f"Credentials login [{task_id[:8]}] - Duo page detected, requesting passcode from user")
+                auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_DUO_PASSCODE)
+
+                # Block until the user submits their passcode (up to 5 minutes)
+                passcode = auth_store.wait_for_duo_passcode(task_id, timeout=300)
+
+                if not passcode:
+                    scraper.close()
+                    auth_store.update_browser_auth_status(
+                        task_id, auth_store.BrowserAuthStatus.FAILED,
+                        "Timed out waiting for Duo passcode."
+                    )
+                    return
+
+                logger.info(f"Credentials login [{task_id[:8]}] - Got passcode, entering in Duo...")
+
+                # Navigate Duo UI to passcode entry
+                try:
+                    driver = scraper.driver
+                    time.sleep(1)
+
+                    # Try clicking "Other options" or "Use a passcode"
+                    for xpath in [
+                        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'other option')]",
+                        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'passcode')]",
+                        "//*[@data-testid='other-options-link']",
+                    ]:
+                        try:
+                            el = driver.find_element(By.XPATH, xpath)
+                            el.click()
+                            time.sleep(1)
+                            break
+                        except Exception:
+                            pass
+
+                    # Find and fill passcode input
+                    passcode_input = None
+                    for selector in [
+                        "input[data-testid='passcode-input']",
+                        "input[name='passcode']",
+                        "input[type='tel']",
+                        "input[type='text']",
+                    ]:
+                        try:
+                            passcode_input = WebDriverWait(driver, 5).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                            )
+                            break
+                        except Exception:
+                            pass
+
+                    if passcode_input:
+                        passcode_input.clear()
+                        passcode_input.send_keys(passcode)
+                        time.sleep(0.5)
+                        # Submit
+                        for btn_selector in [
+                            "button[data-testid='passcode-submit']",
+                            "button[type='submit']",
+                        ]:
+                            try:
+                                driver.find_element(By.CSS_SELECTOR, btn_selector).click()
+                                break
+                            except Exception:
+                                pass
+                        else:
+                            passcode_input.submit()
+                    else:
+                        logger.error(f"Credentials login [{task_id[:8]}] - Could not find Duo passcode input")
+                        scraper.close()
+                        auth_store.update_browser_auth_status(
+                            task_id, auth_store.BrowserAuthStatus.FAILED,
+                            "Could not find Duo passcode input. Please try again."
+                        )
+                        return
+
+                except Exception as e:
+                    logger.error(f"Credentials login [{task_id[:8]}] - Duo passcode entry failed: {e}")
+                    scraper.close()
+                    auth_store.update_browser_auth_status(
+                        task_id, auth_store.BrowserAuthStatus.FAILED, str(e)
+                    )
+                    return
+
+                # Wait for redirect to LS after passcode entry
+                for _ in range(60):
+                    time.sleep(2)
+                    current_url = scraper.driver.current_url
+                    if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
+                        logger.info(f"Credentials login [{task_id[:8]}] - Login successful (passcode)!")
+                        _capture_and_finish()
+                        return
+
+                scraper.close()
+                auth_store.update_browser_auth_status(
+                    task_id, auth_store.BrowserAuthStatus.FAILED,
+                    "Passcode was incorrect or login timed out. Please try again."
+                )
 
         except Exception as e:
             logger.error(f"Credentials login [{task_id[:8]}] failed: {e}")
@@ -460,6 +561,21 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
     thread.start()
 
     return {"success": True, "task_id": task_id, "message": "Logging in..."}
+
+
+class DuoPasscodeRequest(BaseModel):
+    code: str
+
+
+@app.post("/auth/ls-duo-passcode/{task_id}")
+def submit_duo_passcode(task_id: str, req: DuoPasscodeRequest, user_id: str = Depends(get_current_user)):
+    """Accept the user's Duo passcode from the frontend and forward it to the waiting login thread."""
+    code = req.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Passcode is required")
+    auth_store.set_duo_passcode(task_id, code)
+    logger.info(f"POST /auth/ls-duo-passcode task={task_id[:8]} - Passcode received")
+    return {"success": True}
 
 
 @app.get("/auth/browser-status/{task_id}")

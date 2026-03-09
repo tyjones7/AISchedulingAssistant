@@ -19,6 +19,8 @@ function LoginPage({ onLoginSuccess }) {
 
   const [netid, setNetid] = useState('')
   const [password, setPassword] = useState('')
+  const [duoCode, setDuoCode] = useState('')
+  const [duoSubmitting, setDuoSubmitting] = useState(false)
 
   // LS connected state
   const [lsConnected, setLsConnected] = useState(false)
@@ -118,6 +120,23 @@ function LoginPage({ onLoginSuccess }) {
     }
   }
 
+  const handleDuoSubmit = async (e) => {
+    e.preventDefault()
+    if (!duoCode.trim() || !taskId) return
+    setDuoSubmitting(true)
+    try {
+      await authFetch(`${API_BASE}/auth/ls-duo-passcode/${taskId}`, {
+        method: 'POST',
+        body: JSON.stringify({ code: duoCode.trim() }),
+      })
+      setDuoCode('')
+    } catch (err) {
+      console.error('[LoginPage] Duo submit error:', err)
+    } finally {
+      setDuoSubmitting(false)
+    }
+  }
+
   const handleCanvasConnect = async () => {
     const token = canvasToken.trim()
     if (!token) return
@@ -155,16 +174,12 @@ function LoginPage({ onLoginSuccess }) {
 
   const getStatusMessage = () => {
     switch (status) {
-      case 'opening':
-        return 'Opening BYU login...'
-      case 'waiting_for_login':
-        return 'Sign in on the BYU tab that just opened...'
-      case 'waiting_for_mfa':
-        return 'Complete Duo MFA in the new tab...'
-      case 'authenticated':
-        return 'Login successful!'
-      default:
-        return 'Connecting...'
+      case 'opening': return 'Opening browser...'
+      case 'waiting_for_login': return 'Logging in to BYU...'
+      case 'waiting_for_mfa': return 'Waiting for Duo...'
+      case 'waiting_for_duo_passcode': return 'Enter your Duo passcode'
+      case 'authenticated': return 'Login successful!'
+      default: return 'Connecting...'
     }
   }
 
@@ -210,11 +225,40 @@ function LoginPage({ onLoginSuccess }) {
                       <span className="status-spinner" />
                     )}
                     <span className="status-message">{getStatusMessage()}</span>
-                    {status === 'waiting_for_mfa' && (
-                      <p className="duo-hint">Check your phone for a Duo push and approve it.</p>
-                    )}
                   </div>
-                ) : (
+                ) : null}
+
+                {status === 'waiting_for_duo_passcode' && (
+                  <form className="ls-credentials-form" onSubmit={handleDuoSubmit}>
+                    <p className="duo-hint" style={{marginTop: 0}}>
+                      Open your <strong>Duo Mobile</strong> app → tap <strong>Show</strong> next to your BYU account → enter the 6-digit passcode below.
+                    </p>
+                    <div className="ls-field">
+                      <label className="ls-label" htmlFor="duo-code">Duo Passcode</label>
+                      <input
+                        id="duo-code"
+                        type="text"
+                        inputMode="numeric"
+                        className="ls-input"
+                        placeholder="123456"
+                        value={duoCode}
+                        onChange={(e) => setDuoCode(e.target.value)}
+                        maxLength={6}
+                        autoFocus
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="byu-login-button"
+                      disabled={duoCode.trim().length < 6 || duoSubmitting}
+                    >
+                      {duoSubmitting ? 'Submitting...' : 'Submit Passcode'}
+                    </button>
+                  </form>
+                )}
+
+                {!loading && !status && (
                   <form className="ls-credentials-form" onSubmit={handleBYULogin}>
                     <div className="ls-field">
                       <label className="ls-label" htmlFor="byu-netid">BYU NetID</label>

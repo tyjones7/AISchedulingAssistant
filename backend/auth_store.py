@@ -24,6 +24,7 @@ class BrowserAuthStatus(str, Enum):
     OPENING = "opening"
     WAITING_FOR_LOGIN = "waiting_for_login"
     WAITING_FOR_MFA = "waiting_for_mfa"
+    WAITING_FOR_DUO_PASSCODE = "waiting_for_duo_passcode"
     AUTHENTICATED = "authenticated"
     FAILED = "failed"
 
@@ -43,6 +44,31 @@ class BrowserAuthTask:
 # Browser auth tasks are short-lived (one per login attempt) — no user_id needed
 _browser_auth_tasks: dict[str, BrowserAuthTask] = {}
 _browser_auth_lock = threading.Lock()
+
+# Duo passcode coordination: task_id → (Event, passcode)
+_duo_events: dict[str, threading.Event] = {}
+_duo_passcodes: dict[str, str] = {}
+
+
+def wait_for_duo_passcode(task_id: str, timeout: float = 300.0) -> Optional[str]:
+    """Block until the user submits a Duo passcode via the API, or timeout."""
+    event = threading.Event()
+    _duo_events[task_id] = event
+    # Already submitted before we started waiting?
+    if task_id in _duo_passcodes:
+        _duo_events.pop(task_id, None)
+        return _duo_passcodes.pop(task_id)
+    event.wait(timeout=timeout)
+    _duo_events.pop(task_id, None)
+    return _duo_passcodes.pop(task_id, None)
+
+
+def set_duo_passcode(task_id: str, code: str):
+    """Called when the user submits their Duo passcode from the frontend."""
+    _duo_passcodes[task_id] = code
+    event = _duo_events.get(task_id)
+    if event:
+        event.set()
 
 # Per-user session data: user_id -> {cookies, base_url, local_storage, session_storage}
 _sessions: dict[str, dict] = {}
