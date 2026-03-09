@@ -413,81 +413,107 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
                 scraper.close()
                 auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.AUTHENTICATED)
 
-            max_wait = 30  # seconds to wait before switching to passcode mode
+            # Wait up to 60 seconds watching for LS success, Duo page, or wrong password
             waited = 0
             on_duo_page = False
 
-            while waited < max_wait:
+            while waited < 60:
                 current_url = scraper.driver.current_url
+                logger.info(f"Credentials login [{task_id[:8]}] - t={waited}s url={current_url[:80]}")
 
                 if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
-                    logger.info(f"Credentials login [{task_id[:8]}] - Login successful (push approved)!")
+                    logger.info(f"Credentials login [{task_id[:8]}] - Login successful!")
                     _capture_and_finish()
                     return
 
-                if 'duo' in current_url.lower() or 'duosecurity' in current_url.lower():
-                    on_duo_page = True
-                    break
-
-                # Check for wrong password
+                # Detect Duo — both URL redirect and iframe-on-CAS-page cases
                 try:
-                    page_src = scraper.driver.page_source.lower()
-                    if "invalid credentials" in page_src or "incorrect" in page_src:
+                    page_src = scraper.driver.page_source
+                    page_title = scraper.driver.title
+                    logger.info(f"Credentials login [{task_id[:8]}] - page title: {page_title!r}")
+
+                    if ('duo' in current_url.lower() or 'duosecurity' in current_url.lower()
+                            or 'duo' in page_title.lower()
+                            or 'duo' in page_src.lower()[:2000]):
+                        on_duo_page = True
+                        # Log first 2000 chars of page source so we can see the Duo HTML
+                        logger.info(f"Credentials login [{task_id[:8]}] - DUO PAGE SOURCE (first 2000): {page_src[:2000]}")
+                        break
+
+                    if "invalid credentials" in page_src.lower() or "incorrect" in page_src.lower():
                         scraper.close()
                         auth_store.update_browser_auth_status(
                             task_id, auth_store.BrowserAuthStatus.FAILED,
                             "Incorrect NetID or password. Please try again."
                         )
                         return
+                except Exception as e:
+                    logger.warning(f"Credentials login [{task_id[:8]}] - page check error: {e}")
+
+                time.sleep(3)
+                waited += 3
+
+            # Duo page detected — try every known button selector to trigger push
+            driver = scraper.driver
+            time.sleep(3)  # let page fully render
+
+            push_clicked = False
+            for selector in [
+                "button[data-testid='primary-button']",
+                "button[data-action='primary']",
+                "button.btn-primary",
+                "#login-btn",
+                "input[type='submit']",
+                "button[type='submit']",
+            ]:
+                try:
+                    btn = WebDriverWait(driver, 4).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                    logger.info(f"Credentials login [{task_id[:8]}] - Clicking Duo button: {selector} text={btn.text!r}")
+                    btn.click()
+                    push_clicked = True
+                    break
                 except Exception:
                     pass
 
-                time.sleep(2)
-                waited += 2
-
-            # On Duo page — auto-click the push button then wait for BYU app approval
-            if on_duo_page or waited >= max_wait:
-                logger.info(f"Credentials login [{task_id[:8]}] - Duo page detected, attempting to trigger push")
-                driver = scraper.driver
-                time.sleep(2)  # let Duo fully load
-
-                # Try to click the "Log in" / "Send me a push" button in Duo Universal Prompt
-                push_clicked = False
-                for selector in [
-                    "button[data-testid='primary-button']",
-                    "button[data-action='primary']",
-                    "button.btn-primary",
-                    "button[type='submit']",
-                ]:
+            # Also try XPath for buttons with push-related text
+            if not push_clicked:
+                for text in ["Log in", "Send me a push", "Send Push", "Duo Push"]:
                     try:
-                        btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                        btn = driver.find_element(By.XPATH, f"//button[contains(.,'{text}')]")
+                        logger.info(f"Credentials login [{task_id[:8]}] - Clicking Duo button by text: {text!r}")
                         btn.click()
                         push_clicked = True
-                        logger.info(f"Credentials login [{task_id[:8]}] - Clicked Duo push button ({selector})")
                         break
                     except Exception:
                         pass
 
-                if not push_clicked:
-                    logger.warning(f"Credentials login [{task_id[:8]}] - Could not find Duo push button, will still wait")
+            logger.info(f"Credentials login [{task_id[:8]}] - push_clicked={push_clicked}, now waiting for BYU app approval")
 
-                # Tell the frontend to show "Check your BYU app"
-                auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_MFA)
+            # Log page source AFTER clicking so we can see what changed
+            try:
+                logger.info(f"Credentials login [{task_id[:8]}] - POST-CLICK PAGE SOURCE (first 1500): {driver.page_source[:1500]}")
+            except Exception:
+                pass
 
-                # Wait up to 3 minutes for the user to approve in the BYU app
-                for _ in range(90):
-                    time.sleep(2)
+            auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_MFA)
+
+            # Wait up to 3 minutes for the user to approve on their BYU/Duo app
+            for _ in range(90):
+                time.sleep(2)
+                try:
                     current_url = driver.current_url
                     if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
-                        logger.info(f"Credentials login [{task_id[:8]}] - Login successful (push approved)!")
+                        logger.info(f"Credentials login [{task_id[:8]}] - Login successful after approval!")
                         _capture_and_finish()
                         return
+                except Exception:
+                    pass
 
-                scraper.close()
-                auth_store.update_browser_auth_status(
-                    task_id, auth_store.BrowserAuthStatus.FAILED,
-                    "Timed out waiting for BYU app approval. Please try again."
-                )
+            scraper.close()
+            auth_store.update_browser_auth_status(
+                task_id, auth_store.BrowserAuthStatus.FAILED,
+                "Timed out waiting for approval. Please try again."
+            )
 
         except Exception as e:
             logger.error(f"Credentials login [{task_id[:8]}] failed: {e}")
