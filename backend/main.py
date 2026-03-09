@@ -487,39 +487,82 @@ def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_c
 
             push_clicked = False
 
-            # CSS selectors (Duo Universal Prompt OIDC / frameless)
-            for selector in [
-                "button[data-testid='primary-button']",
-                "button[data-testid='send-push']",
-                "button[data-action='primary']",
-                "button.btn-primary",
-                "button.base-button--type-primary",
-                "#login-btn",
-                "button[type='submit']",
-                "input[type='submit']",
-            ]:
-                try:
-                    btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                    logger.info(f"Credentials login [{task_id[:8]}] - Found button via CSS '{selector}' text={btn.text!r}")
-                    driver.execute_script("arguments[0].click();", btn)
-                    push_clicked = True
-                    break
-                except Exception:
-                    pass
-
-            # XPath fallback by button text
-            if not push_clicked:
-                for text in ["Log in", "Send me a push", "Send Push", "Duo Push", "Push", "Continue"]:
+            def _try_click_push_button():
+                """Try to find and click the Duo Push send button. Returns True if clicked."""
+                # CSS selectors for primary push button
+                for selector in [
+                    "button[data-testid='primary-button']",
+                    "button[data-testid='send-push']",
+                    "button[data-action='primary']",
+                    "button.btn-primary",
+                    "button.base-button--type-primary",
+                ]:
                     try:
-                        btn = WebDriverWait(driver, 3).until(
-                            EC.element_to_be_clickable((By.XPATH, f"//button[contains(normalize-space(),'{text}')]"))
-                        )
-                        logger.info(f"Credentials login [{task_id[:8]}] - Found button by text {text!r}, clicking")
-                        driver.execute_script("arguments[0].click();", btn)
-                        push_clicked = True
-                        break
+                        btn = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                        if btn.text.strip():
+                            logger.info(f"Credentials login [{task_id[:8]}] - Push via CSS '{selector}' text={btn.text!r}")
+                            driver.execute_script("arguments[0].click();", btn)
+                            return True
                     except Exception:
                         pass
+                # XPath by push-related text
+                for text in ["Send me a push", "Send Push", "Send a push", "Push Notification"]:
+                    try:
+                        btn = WebDriverWait(driver, 2).until(
+                            EC.element_to_be_clickable((By.XPATH, f"//button[contains(normalize-space(),'{text}')]"))
+                        )
+                        logger.info(f"Credentials login [{task_id[:8]}] - Push via text {text!r}, clicking")
+                        driver.execute_script("arguments[0].click();", btn)
+                        return True
+                    except Exception:
+                        pass
+                return False
+
+            # Step 1: Try to click a push button directly (in case Duo Push is already selected)
+            push_clicked = _try_click_push_button()
+
+            # Step 2: If no push button found, expand "Other options" to find Duo Push
+            if not push_clicked:
+                try:
+                    other_btn = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, "//button[contains(normalize-space(),'Other options')]"))
+                    )
+                    logger.info(f"Credentials login [{task_id[:8]}] - Clicking 'Other options' to expand factor list")
+                    driver.execute_script("arguments[0].click();", other_btn)
+                    time.sleep(3)  # Wait for factor list to render
+
+                    # Log what appeared
+                    try:
+                        all_btns_after = driver.find_elements(By.TAG_NAME, "button")
+                        logger.info(f"Credentials login [{task_id[:8]}] - After 'Other options' buttons: "
+                                    + str([(b.get_attribute('data-testid'), b.text[:30]) for b in all_btns_after]))
+                    except Exception:
+                        pass
+
+                    # Click "Duo Push" option in the expanded list
+                    for text in ["Duo Push", "Duo Mobile", "Push"]:
+                        try:
+                            elem = WebDriverWait(driver, 4).until(
+                                EC.element_to_be_clickable((By.XPATH, f"//*[contains(normalize-space(),'{text}')][@role='button' or self::button or self::a]"))
+                            )
+                            logger.info(f"Credentials login [{task_id[:8]}] - Found factor option {text!r}, clicking")
+                            driver.execute_script("arguments[0].click();", elem)
+                            time.sleep(3)  # Wait for Duo Push screen to load
+                            push_clicked = True
+                            break
+                        except Exception:
+                            pass
+
+                    # After selecting Duo Push factor, try clicking the actual "Send push" button
+                    if push_clicked:
+                        push_clicked = _try_click_push_button()
+                        if not push_clicked:
+                            # Duo may auto-send the push — mark as clicked anyway and wait
+                            logger.info(f"Credentials login [{task_id[:8]}] - No explicit send button; push may be auto-sent")
+                            push_clicked = True
+
+                except Exception as e:
+                    logger.warning(f"Credentials login [{task_id[:8]}] - 'Other options' flow failed: {e}")
 
             logger.info(f"Credentials login [{task_id[:8]}] - push_clicked={push_clicked}")
 
