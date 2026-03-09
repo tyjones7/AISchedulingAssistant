@@ -17,6 +17,10 @@ function LoginPage({ onLoginSuccess }) {
   const [canvasUser, setCanvasUser] = useState(null)
   const [canvasError, setCanvasError] = useState(null)
 
+  // LS credentials form
+  const [netid, setNetid] = useState('')
+  const [password, setPassword] = useState('')
+
   // LS connected state
   const [lsConnected, setLsConnected] = useState(false)
 
@@ -84,24 +88,29 @@ function LoginPage({ onLoginSuccess }) {
     return () => clearInterval(interval)
   }, [taskId, loading])
 
-  const handleBYULogin = async () => {
+  const handleBYULogin = async (e) => {
+    e.preventDefault()
+    if (!netid.trim() || !password) return
+
     setLoading(true)
     setError(null)
     setStatus('opening')
 
     try {
-      const response = await authFetch(`${API_BASE}/auth/browser-login`, {
+      const response = await authFetch(`${API_BASE}/auth/ls-credentials`, {
         method: 'POST',
+        body: JSON.stringify({ netid: netid.trim(), password }),
       })
 
       if (!response.ok) {
         const data = await response.json()
-        throw new Error(data.detail || 'Failed to open login')
+        throw new Error(data.detail || 'Failed to start login')
       }
 
       const data = await response.json()
+      setPassword('') // clear password from state immediately
       setTaskId(data.task_id)
-      setStatus('waiting_for_login')
+      setStatus('waiting_for_mfa')
     } catch (err) {
       console.error('[LoginPage] Login error:', err)
       setError(err.message || 'Failed to connect to server')
@@ -189,7 +198,7 @@ function LoginPage({ onLoginSuccess }) {
 
             {!lsConnected && (
               <>
-                {loading && status && (
+                {loading && status ? (
                   <div className={`login-status ${status === 'authenticated' ? 'login-success' : ''}`}>
                     {status === 'authenticated' ? (
                       <span className="success-check-wrap">
@@ -201,20 +210,47 @@ function LoginPage({ onLoginSuccess }) {
                       <span className="status-spinner" />
                     )}
                     <span className="status-message">{getStatusMessage()}</span>
+                    {status === 'waiting_for_mfa' && (
+                      <p className="duo-hint">Check your phone for a Duo push notification and approve it.</p>
+                    )}
                   </div>
+                ) : (
+                  <form className="ls-credentials-form" onSubmit={handleBYULogin}>
+                    <div className="ls-field">
+                      <label className="ls-label" htmlFor="byu-netid">BYU NetID</label>
+                      <input
+                        id="byu-netid"
+                        type="text"
+                        className="ls-input"
+                        placeholder="e.g. tjones42"
+                        value={netid}
+                        onChange={(e) => setNetid(e.target.value)}
+                        autoComplete="username"
+                        required
+                      />
+                    </div>
+                    <div className="ls-field">
+                      <label className="ls-label" htmlFor="byu-password">BYU Password</label>
+                      <input
+                        id="byu-password"
+                        type="password"
+                        className="ls-input"
+                        placeholder="Your BYU password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="current-password"
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="byu-login-button"
+                      disabled={!netid.trim() || !password}
+                    >
+                      Connect Learning Suite
+                    </button>
+                  </form>
                 )}
-
-                <button
-                  type="button"
-                  className={`byu-login-button ${loading ? 'is-loading' : ''}`}
-                  onClick={handleBYULogin}
-                  disabled={loading}
-                >
-                  <svg className="byu-logo" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-                  </svg>
-                  {loading ? 'Opening BYU Login...' : 'Sign in with BYU'}
-                </button>
               </>
             )}
           </div>

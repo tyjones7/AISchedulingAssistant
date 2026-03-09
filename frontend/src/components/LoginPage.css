@@ -185,6 +185,53 @@
   height: 24px;
 }
 
+.ls-credentials-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ls-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ls-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.ls-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #f1f5f9;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.ls-input:focus {
+  border-color: #3b82f6;
+}
+
+.ls-input::placeholder {
+  color: #475569;
+}
+
+.duo-hint {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin: 6px 0 0;
+  line-height: 1.4;
+}
+
 .login-instructions {
   text-align: center;
   font-size: 0.85rem;

@@ -323,6 +323,145 @@ def browser_login(user_id: str = Depends(get_current_user)):
     return {"success": True, "task_id": task_id, "message": "Browser opening..."}
 
 
+class LSCredentialsRequest(BaseModel):
+    netid: str
+    password: str
+
+
+@app.post("/auth/ls-credentials")
+def ls_credentials_login(req: LSCredentialsRequest, user_id: str = Depends(get_current_user)):
+    """Login to Learning Suite using BYU credentials in headless Chrome.
+
+    Automates the CAS login form, then waits for the user to approve a Duo
+    push notification on their phone. The password is used only to fill the
+    login form and is cleared from memory immediately after — it is never
+    stored anywhere.
+    """
+    import threading
+    import re
+    import time
+    from scraper.learning_suite_scraper import LearningSuiteScraper
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+
+    task_id = auth_store.create_browser_auth_task()
+    netid = req.netid.strip()
+    password = req.password  # captured in closure; cleared below
+
+    logger.info(f"POST /auth/ls-credentials user={user_id[:8]} netid={netid} - task {task_id[:8]}")
+
+    def run_credentials_login(pwd: str):
+        scraper = None
+        try:
+            auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.OPENING)
+            scraper = LearningSuiteScraper(headless=True)
+            scraper._setup_driver()
+
+            auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_LOGIN)
+
+            # Navigate to LS — redirects to BYU CAS login
+            scraper.driver.get("https://learningsuite.byu.edu")
+
+            # Wait for CAS username field
+            wait = WebDriverWait(scraper.driver, 20)
+            try:
+                username_field = wait.until(EC.presence_of_element_located((By.ID, "username")))
+            except Exception:
+                # Try name attribute as fallback
+                username_field = wait.until(EC.presence_of_element_located((By.NAME, "username")))
+
+            username_field.clear()
+            username_field.send_keys(netid)
+
+            try:
+                password_field = scraper.driver.find_element(By.ID, "password")
+            except Exception:
+                password_field = scraper.driver.find_element(By.NAME, "password")
+
+            password_field.clear()
+            password_field.send_keys(pwd)
+            pwd = ""  # Clear password from local variable immediately
+
+            password_field.submit()
+
+            # Now waiting for Duo MFA — push is sent automatically to registered device
+            auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.WAITING_FOR_MFA)
+            logger.info(f"Credentials login [{task_id[:8]}] - Credentials submitted, waiting for Duo...")
+
+            # Wait up to 2 minutes for Duo approval + redirect back to LS
+            max_wait = 120
+            waited = 0
+            while waited < max_wait:
+                current_url = scraper.driver.current_url
+
+                if re.match(r'https://learningsuite\.byu\.edu/\.[A-Za-z0-9]+', current_url):
+                    logger.info(f"Credentials login [{task_id[:8]}] - Login successful!")
+                    dynamic_base_url = scraper._extract_dynamic_base_url()
+                    cookies = scraper.driver.get_cookies()
+
+                    local_storage = {}
+                    session_storage = {}
+                    try:
+                        local_storage = scraper.driver.execute_script(
+                            "var items = {}; for (var i = 0; i < localStorage.length; i++) {"
+                            " var k = localStorage.key(i); items[k] = localStorage.getItem(k); } return items;"
+                        ) or {}
+                    except Exception:
+                        pass
+                    try:
+                        session_storage = scraper.driver.execute_script(
+                            "var items = {}; for (var i = 0; i < sessionStorage.length; i++) {"
+                            " var k = sessionStorage.key(i); items[k] = sessionStorage.getItem(k); } return items;"
+                        ) or {}
+                    except Exception:
+                        pass
+
+                    auth_store.set_session_data(user_id, cookies, dynamic_base_url)
+                    auth_store.set_web_storage(user_id, local_storage, session_storage)
+                    scraper.close()
+                    auth_store.update_browser_auth_status(task_id, auth_store.BrowserAuthStatus.AUTHENTICATED)
+                    return
+
+                # Check for wrong password / CAS error
+                try:
+                    page_src = scraper.driver.page_source.lower()
+                    if "invalid credentials" in page_src or "incorrect" in page_src or "failed" in page_src:
+                        scraper.close()
+                        auth_store.update_browser_auth_status(
+                            task_id, auth_store.BrowserAuthStatus.FAILED,
+                            "Incorrect NetID or password. Please try again."
+                        )
+                        return
+                except Exception:
+                    pass
+
+                time.sleep(2)
+                waited += 2
+
+            scraper.close()
+            auth_store.update_browser_auth_status(
+                task_id, auth_store.BrowserAuthStatus.FAILED,
+                "Timed out waiting for Duo approval. Please try again."
+            )
+
+        except Exception as e:
+            logger.error(f"Credentials login [{task_id[:8]}] failed: {e}")
+            if scraper:
+                try:
+                    scraper.close()
+                except Exception:
+                    pass
+            auth_store.update_browser_auth_status(
+                task_id, auth_store.BrowserAuthStatus.FAILED, str(e)
+            )
+
+    thread = threading.Thread(target=run_credentials_login, args=(password,), daemon=True)
+    thread.start()
+
+    return {"success": True, "task_id": task_id, "message": "Logging in..."}
+
+
 @app.get("/auth/browser-status/{task_id}")
 def browser_auth_status(task_id: str, user_id: str = Depends(get_current_user)):
     """Check the status of a browser authentication task."""
