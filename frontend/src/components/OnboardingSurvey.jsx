@@ -67,7 +67,7 @@ export default function OnboardingSurvey({ onComplete }) {
           <div className="survey-welcome-logo">C</div>
           <h1 className="survey-welcome-title">Welcome to CampusAI</h1>
           <p className="survey-welcome-sub">
-            CampusAI pulls your BYU assignments and builds you a personalized study schedule — so you&apos;re never caught off guard.
+            CampusAI pulls your Canvas assignments and builds you a personalized study schedule — so you&apos;re never caught off guard by a deadline.
           </p>
           <button className="survey-next survey-welcome-btn" onClick={() => setStep(0)}>
             Get started

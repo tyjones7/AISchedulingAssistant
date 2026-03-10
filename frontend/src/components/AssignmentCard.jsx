@@ -205,9 +205,9 @@ function AssignmentCard({
         {assignment.point_value != null && (
           <span className="card-points">{assignment.point_value} pts</span>
         )}
-        {assignment.source && (
-          <span className={`source-badge source-${assignment.source === 'canvas' ? 'canvas' : 'ls'}`}>
-            {assignment.source === 'canvas' ? 'Canvas' : 'LS'}
+        {assignment.source && assignment.source !== 'canvas' && (
+          <span className="source-badge source-manual">
+            {assignment.source === 'manual' ? 'Manual' : assignment.source.toUpperCase()}
           </span>
         )}
         <span className={`card-status status-${assignment.status}`}>
