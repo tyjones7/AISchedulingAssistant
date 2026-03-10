@@ -269,12 +269,6 @@ class SyncService:
             self._save_sync_metadata(task_id, user_id, "failed", None, error_msg)
 
         finally:
-            if scraper and should_close_scraper:
-                try:
-                    scraper.close()
-                except:
-                    pass
-
             with self._task_lock:
                 if self._current_task_id == task_id:
                     self._current_task_id = None
