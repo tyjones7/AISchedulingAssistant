@@ -51,9 +51,12 @@
 
 .brand-name {
   font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: -0.3px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #0071e3 0%, #7c3aed 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.5px;
 }
 
 .dash-header-actions {

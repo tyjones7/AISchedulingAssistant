@@ -510,7 +510,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
         <header className="dash-header">
           <div className="dash-header-inner">
             <div className="dash-brand">
-              <div className="brand-logo">C</div>
               <span className="brand-name">CampusAI</span>
             </div>
             <div className="dash-header-actions">
@@ -547,7 +546,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
         <header className="dash-header">
           <div className="dash-header-inner">
             <div className="dash-brand">
-              <div className="brand-logo">C</div>
               <span className="brand-name">CampusAI</span>
             </div>
             <div className="dash-header-actions">
@@ -587,20 +585,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
             <span className="brand-name">CampusAI</span>
           </div>
           <div className="dash-header-actions">
-            {/* AI involvement selector */}
-            {preferences && (
-              <div className="involvement-selector" title="AI involvement level">
-                {INVOLVEMENT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className={`involvement-opt ${involvementLevel === opt.value ? 'active' : ''}`}
-                    onClick={() => handleInvolvementChange(opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
             <button
               className="ai-plan-btn"
               onClick={handleGenerateAI}

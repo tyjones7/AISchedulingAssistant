@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { authFetch, API_BASE } from '../lib/api'
+import { registerPushNotifications, unregisterPushNotifications, isPushSupported, getPushPermission } from '../utils/pushNotifications'
 import './Settings.css'
 
 const STUDY_TIME_OPTIONS = [
@@ -40,6 +41,12 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [prefSaving, setPrefSaving] = useState(false)
   const [prefSaved, setPrefSaved] = useState(false)
   const [prefError, setPrefError] = useState(null)
+
+  // Push notifications
+  const [pushSupported] = useState(() => isPushSupported())
+  const [pushPermission, setPushPermission] = useState(() => getPushPermission())
+  const [pushLoading, setPushLoading] = useState(false)
+  const [pushError, setPushError] = useState(null)
 
   // Weekly schedule state
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -125,6 +132,27 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       setPrefError('Failed to save. Please try again.')
     } finally {
       setPrefSaving(false)
+    }
+  }
+
+  const handlePushToggle = async () => {
+    setPushLoading(true)
+    setPushError(null)
+    try {
+      if (pushPermission === 'granted') {
+        await unregisterPushNotifications()
+        setPushPermission('default')
+      } else {
+        const ok = await registerPushNotifications()
+        setPushPermission(ok ? 'granted' : getPushPermission())
+        if (!ok && getPushPermission() === 'denied') {
+          setPushError('Notifications blocked. Enable them in your browser settings.')
+        }
+      }
+    } catch {
+      setPushError('Something went wrong. Please try again.')
+    } finally {
+      setPushLoading(false)
     }
   }
 
@@ -298,6 +326,41 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                 {prefSaving ? 'Saving...' : 'Save Preferences'}
               </button>
             </div>
+          </section>
+
+          {/* Notifications Section */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">Notifications</h3>
+            {!pushSupported ? (
+              <p className="settings-hint">Push notifications aren&apos;t supported in this browser.</p>
+            ) : (
+              <>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <span className="settings-row-label">Deadline reminders</span>
+                    <span className="settings-row-value">
+                      {pushPermission === 'granted' ? 'Enabled' : pushPermission === 'denied' ? 'Blocked by browser' : 'Disabled'}
+                    </span>
+                  </div>
+                  <button
+                    className={pushPermission === 'granted' ? 'settings-danger-btn' : 'settings-action-btn'}
+                    onClick={handlePushToggle}
+                    disabled={pushLoading || pushPermission === 'denied'}
+                  >
+                    {pushLoading ? 'Working…' : pushPermission === 'granted' ? 'Turn off' : 'Enable'}
+                  </button>
+                </div>
+                {pushPermission === 'denied' && (
+                  <p className="settings-hint settings-hint--warn">
+                    Notifications are blocked. Go to your browser&apos;s site settings to allow them for this site.
+                  </p>
+                )}
+                {pushError && <p className="settings-error">{pushError}</p>}
+                <p className="settings-hint">
+                  Get notified 24 hours before an assignment is due.
+                </p>
+              </>
+            )}
           </section>
 
           {/* Weekly Schedule Section */}

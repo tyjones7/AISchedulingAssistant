@@ -265,6 +265,10 @@
   text-decoration: underline;
 }
 
+.settings-hint--warn {
+  color: #d97706;
+}
+
 /* Preferences */
 .settings-pref-group {
   margin-bottom: var(--space-5);
