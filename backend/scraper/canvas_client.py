@@ -117,6 +117,7 @@ class CanvasClient:
                 "canvas_id": a.get("id"),
                 "assignment_type": a.get("submission_types", ["unknown"])[0] if a.get("submission_types") else "unknown",
                 "is_extra_credit": is_extra_credit,
+                "point_value": a.get("points_possible"),
             })
 
         return assignments
@@ -215,6 +216,7 @@ class CanvasClient:
                     "source": "canvas",
                     "canvas_id": canvas_id,
                     "assignment_type": a.get("assignment_type"),
+                    "point_value": a.get("point_value"),
                     "last_scraped_at": now_iso,
                     "is_extra_credit": a.get("is_extra_credit", False),
                 }
@@ -243,8 +245,8 @@ class CanvasClient:
                     ).execute()
                     counts["modified"] += 1
                 else:
-                    # Insert new
-                    row["status"] = a["status"]
+                    # Insert new — mark as newly_assigned unless already submitted
+                    row["status"] = "newly_assigned" if a["status"] != "submitted" else "submitted"
                     supabase.table("assignments").insert(row).execute()
                     counts["new"] += 1
 
