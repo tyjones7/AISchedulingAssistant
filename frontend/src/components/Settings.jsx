@@ -41,6 +41,14 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [prefSaved, setPrefSaved] = useState(false)
   const [prefError, setPrefError] = useState(null)
 
+  // Weekly schedule state
+  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const [schedule, setSchedule] = useState(() => {
+    return preferences?.weekly_schedule || []
+  })
+  const [newBlock, setNewBlock] = useState({ days: [], label: '', start: '08:00', end: '09:00' })
+  const [showAddBlock, setShowAddBlock] = useState(false)
+
   // Load user info on mount
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -63,6 +71,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.advance_days !== undefined) setAdvanceDays(preferences.advance_days)
     if (preferences.work_style) setWorkStyle(preferences.work_style)
     if (preferences.involvement_level) setInvolvementLevel(preferences.involvement_level)
+    if (preferences.weekly_schedule !== undefined) setSchedule(preferences.weekly_schedule || [])
   }, [preferences])
 
   const handleCanvasConnect = async () => {
@@ -101,6 +110,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
         advance_days: Number(advanceDays),
         work_style: workStyle,
         involvement_level: involvementLevel,
+        weekly_schedule: schedule,
       }
       const res = await authFetch(`${API_BASE}/preferences`, {
         method: 'POST',
@@ -288,6 +298,79 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                 {prefSaving ? 'Saving...' : 'Save Preferences'}
               </button>
             </div>
+          </section>
+
+          {/* Weekly Schedule Section */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">Weekly Schedule</h3>
+            <p className="settings-section-desc">Add your recurring class times and commitments so the AI schedules study time around them.</p>
+
+            {schedule.length > 0 && (
+              <div className="schedule-blocks">
+                {schedule.map((block, i) => (
+                  <div key={i} className="schedule-block">
+                    <span className="schedule-block-days">{block.day}</span>
+                    <span className="schedule-block-time">{block.start}–{block.end}</span>
+                    {block.label && <span className="schedule-block-label">{block.label}</span>}
+                    <button
+                      className="schedule-block-remove"
+                      onClick={() => setSchedule(s => s.filter((_, idx) => idx !== i))}
+                      aria-label="Remove"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {showAddBlock ? (
+              <div className="schedule-add-form">
+                <div className="schedule-days-row">
+                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`schedule-day-btn ${newBlock.days.includes(d) ? 'active' : ''}`}
+                      onClick={() => setNewBlock(b => ({
+                        ...b,
+                        days: b.days.includes(d) ? b.days.filter(x => x !== d) : [...b.days, d]
+                      }))}
+                    >{d}</button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  className="schedule-label-input"
+                  placeholder="Label (e.g. STRAT 490R)"
+                  value={newBlock.label}
+                  onChange={(e) => setNewBlock(b => ({ ...b, label: e.target.value }))}
+                />
+                <div className="schedule-time-row">
+                  <input type="time" className="schedule-time-input" value={newBlock.start}
+                    onChange={(e) => setNewBlock(b => ({ ...b, start: e.target.value }))} />
+                  <span>to</span>
+                  <input type="time" className="schedule-time-input" value={newBlock.end}
+                    onChange={(e) => setNewBlock(b => ({ ...b, end: e.target.value }))} />
+                </div>
+                <div className="schedule-add-actions">
+                  <button type="button" className="settings-secondary-btn" onClick={() => { setShowAddBlock(false); setNewBlock({ days: [], label: '', start: '08:00', end: '09:00' }) }}>Cancel</button>
+                  <button
+                    type="button"
+                    className="settings-primary-btn"
+                    disabled={newBlock.days.length === 0}
+                    onClick={() => {
+                      const newEntries = newBlock.days.map(d => ({ day: d, label: newBlock.label, start: newBlock.start, end: newBlock.end }))
+                      setSchedule(s => [...s, ...newEntries])
+                      setShowAddBlock(false)
+                      setNewBlock({ days: [], label: '', start: '08:00', end: '09:00' })
+                    }}
+                  >Add</button>
+                </div>
+              </div>
+            ) : (
+              <button className="settings-secondary-btn" onClick={() => setShowAddBlock(true)}>
+                + Add time block
+              </button>
+            )}
           </section>
         </div>
       </div>

@@ -96,6 +96,17 @@ def _build_profile_context(prefs: Optional[dict]) -> str:
     lines.append(f"  - Work style: {work_style_labels.get(work_style, work_style)}")
     involvement = prefs.get("involvement_level", "balanced")
     lines.append(f"  - AI involvement preference: {involvement_labels.get(involvement, involvement)}")
+    schedule = prefs.get("weekly_schedule") or []
+    if schedule:
+        lines.append("  - Weekly busy schedule (do NOT schedule study time during these blocks):")
+        for block in schedule:
+            day = block.get("day", "")
+            label = block.get("label", "")
+            start = block.get("start", "")
+            end = block.get("end", "")
+            if day and start and end:
+                lines.append(f"      • {day}: {start}–{end}" + (f" ({label})" if label else ""))
+        lines.append("  When suggesting study times, pick gaps BETWEEN these busy blocks.")
     lines.append("Use this profile to tailor all scheduling advice and time block suggestions.")
     return "\n".join(lines)
 

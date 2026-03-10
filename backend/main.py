@@ -29,6 +29,9 @@ class AssignmentUpdate(BaseModel):
     planned_start: Optional[str] = None
     planned_end: Optional[str] = None
     notes: Optional[str] = None
+    title: Optional[str] = None
+    course_name: Optional[str] = None
+    due_date: Optional[str] = None
 
 
 class AssignmentCreate(BaseModel):
@@ -116,6 +119,7 @@ class UserPreferences(BaseModel):
     advance_days: int = 2
     work_style: Literal["spread_out", "batch"] = "spread_out"
     involvement_level: Literal["proactive", "balanced", "prompt_only"] = "balanced"
+    weekly_schedule: Optional[list] = None
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -124,6 +128,7 @@ class UserPreferencesUpdate(BaseModel):
     advance_days: Optional[int] = None
     work_style: Optional[Literal["spread_out", "batch"]] = None
     involvement_level: Optional[Literal["proactive", "balanced", "prompt_only"]] = None
+    weekly_schedule: Optional[list] = None
 
 
 load_dotenv()
@@ -356,6 +361,12 @@ def update_assignment(
         update_data["planned_end"] = update.planned_end
     if update.notes is not None:
         update_data["notes"] = update.notes
+    if update.title is not None:
+        update_data["title"] = update.title
+    if update.course_name is not None:
+        update_data["course_name"] = update.course_name
+    if update.due_date is not None:
+        update_data["due_date"] = update.due_date
 
     if update.estimated_minutes is not None and not (1 <= update.estimated_minutes <= 1440):
         raise HTTPException(status_code=422, detail="estimated_minutes must be between 1 and 1440")
@@ -467,7 +478,7 @@ def save_preferences(body: UserPreferencesUpdate, user_id: str = Depends(get_cur
     logger.info(f"POST /preferences user={user_id[:8]}")
     try:
         existing = supabase_service.table("user_preferences").select("id").eq("user_id", user_id).limit(1).execute()
-        updates = {k: v for k, v in body.model_dump().items() if v is not None}
+        updates = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         updates["user_id"] = user_id
 

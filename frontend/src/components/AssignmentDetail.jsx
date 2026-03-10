@@ -40,6 +40,9 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
   const [plannedStart, setPlannedStart] = useState('')
   const [plannedEnd, setPlannedEnd] = useState('')
   const [notes, setNotes] = useState(assignment?.notes || '')
+  const [editTitle, setEditTitle] = useState(assignment?.title || '')
+  const [editCourse, setEditCourse] = useState(assignment?.course_name || '')
+  const [editDueDate, setEditDueDate] = useState('')
 
   // Initialize dates
   useEffect(() => {
@@ -50,6 +53,10 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
     if (assignment?.planned_end) {
       const date = new Date(assignment.planned_end)
       setPlannedEnd(formatDateTimeLocal(date))
+    }
+    if (assignment?.due_date) {
+      const date = new Date(assignment.due_date)
+      setEditDueDate(formatDateTimeLocal(date))
     }
   }, [assignment])
 
@@ -86,6 +93,12 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
         planned_start: plannedStart ? new Date(plannedStart).toISOString() : '',
         planned_end: plannedEnd ? new Date(plannedEnd).toISOString() : '',
         notes: notes || '',
+      }
+
+      if (assignment.source === 'manual') {
+        if (editTitle.trim()) updateData.title = editTitle.trim()
+        if (editCourse.trim()) updateData.course_name = editCourse.trim()
+        if (editDueDate) updateData.due_date = new Date(editDueDate).toISOString()
       }
 
       const response = await authFetch(
@@ -150,15 +163,47 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
             <h3 className="section-title">Assignment Details</h3>
 
             <div className="detail-grid">
+              {assignment.source === 'manual' && (
+                <>
+                  <div className="detail-item detail-item-full">
+                    <label className="detail-label">Title</label>
+                    <input
+                      type="text"
+                      className="plan-input"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                    />
+                  </div>
+                  <div className="detail-item detail-item-full">
+                    <label className="detail-label">Course</label>
+                    <input
+                      type="text"
+                      className="plan-input"
+                      value={editCourse}
+                      onChange={(e) => setEditCourse(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+
               <div className="detail-item">
                 <label className="detail-label">Due Date</label>
-                {assignment.due_date ? (
-                  <p className={`detail-value ${isPastDue ? 'is-overdue' : ''}`}>
-                    {formatDueDate(assignment.due_date)}
-                    {isPastDue && <span className="overdue-tag">Overdue</span>}
-                  </p>
+                {assignment.source === 'manual' ? (
+                  <input
+                    type="datetime-local"
+                    className="plan-input"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                  />
                 ) : (
-                  <p className="detail-value no-date">No due date</p>
+                  assignment.due_date ? (
+                    <p className={`detail-value ${isPastDue ? 'is-overdue' : ''}`}>
+                      {formatDueDate(assignment.due_date)}
+                      {isPastDue && <span className="overdue-tag">Overdue</span>}
+                    </p>
+                  ) : (
+                    <p className="detail-value no-date">No due date</p>
+                  )
                 )}
               </div>
 
@@ -305,7 +350,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
                   <polyline points="15 3 21 3 21 9" />
                   <line x1="10" y1="14" x2="21" y2="3" />
                 </svg>
-                Google Calendar
+                Add to Google Calendar
               </a>
               <button
                 type="button"
