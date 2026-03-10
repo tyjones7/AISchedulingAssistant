@@ -73,6 +73,42 @@ function formatGoogleDate(date) {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
 }
 
+export function downloadMultiICS(assignments) {
+  const events = assignments.map((assignment) => {
+    const event = buildCalendarEvent(assignment)
+    return [
+      'BEGIN:VEVENT',
+      `UID:${generateUID()}`,
+      `DTSTART:${formatICSDate(event.start)}`,
+      `DTEND:${formatICSDate(event.end)}`,
+      `SUMMARY:${event.title}`,
+      `DESCRIPTION:${event.description.replace(/\n/g, '\\n')}`,
+      `DTSTAMP:${formatICSDate(new Date())}`,
+      'END:VEVENT',
+    ].join('\r\n')
+  })
+
+  const icsContent = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//AI Scheduling Assistant//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    ...events,
+    'END:VCALENDAR',
+  ].join('\r\n')
+
+  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'campusai-study-plan.ics'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 export function getGoogleCalendarUrl(assignment) {
   const event = buildCalendarEvent(assignment)
 

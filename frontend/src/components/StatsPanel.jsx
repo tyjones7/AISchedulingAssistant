@@ -74,6 +74,9 @@ function StatsPanel({ onClose }) {
     return d >= now && d <= sevenDaysFromNow
   }).length
 
+  const totalPoints = assignments.reduce((sum, a) => sum + (a.point_value || 0), 0)
+  const earnedPoints = assignments.filter(a => a.status === 'submitted').reduce((sum, a) => sum + (a.point_value || 0), 0)
+
   // Submission timing
   const timedSubmissions = assignments.filter(a => a.submitted_at && a.due_date)
   const timingBuckets = {
@@ -169,7 +172,7 @@ function StatsPanel({ onClose }) {
               <div className="stats-cards-row">
                 <div className="stats-card">
                   <span className="stats-card-value">{total}</span>
-                  <span className="stats-card-label">Total assignments</span>
+                  <span className="stats-card-label">Total</span>
                 </div>
                 <div className="stats-card">
                   <span className="stats-card-value stats-card-value--green">{submitted}</span>
@@ -177,13 +180,24 @@ function StatsPanel({ onClose }) {
                 </div>
                 <div className="stats-card">
                   <span className="stats-card-value stats-card-value--blue">{completionRate}%</span>
-                  <span className="stats-card-label">Completion rate</span>
+                  <span className="stats-card-label">Done rate</span>
                 </div>
                 <div className="stats-card">
                   <span className="stats-card-value stats-card-value--amber">{dueThisWeek}</span>
                   <span className="stats-card-label">Due this week</span>
                 </div>
               </div>
+              {totalPoints > 0 && (
+                <div className="stats-points-bar">
+                  <div className="stats-points-labels">
+                    <span className="stats-points-text">{earnedPoints.toLocaleString()} / {totalPoints.toLocaleString()} pts tracked</span>
+                    <span className="stats-points-pct">{Math.round((earnedPoints / totalPoints) * 100)}%</span>
+                  </div>
+                  <div className="stats-points-track">
+                    <div className="stats-points-fill" style={{ width: `${(earnedPoints / totalPoints) * 100}%` }} />
+                  </div>
+                </div>
+              )}
 
               {/* Submission Timing */}
               <div className="stats-section">

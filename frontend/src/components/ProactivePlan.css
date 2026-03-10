@@ -194,3 +194,43 @@
   background: rgba(99, 102, 241, 0.07);
   border-color: #6366f1;
 }
+
+/* Export row (after applying) */
+.proactive-export-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.proactive-applied-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+.proactive-cal-btn {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: opacity 0.15s;
+  border: 1px solid;
+}
+
+.proactive-cal-btn:hover { opacity: 0.8; }
+
+.proactive-cal-btn--gcal {
+  background: #fff;
+  border-color: #d1d5db;
+  color: #374151;
+}
+
+.proactive-cal-btn--ics {
+  background: none;
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #6366f1;
+}
