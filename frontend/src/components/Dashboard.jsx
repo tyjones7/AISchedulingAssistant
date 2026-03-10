@@ -625,6 +625,8 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
                 {hideSubmitted ? `Show submitted (${submittedCount})` : 'Hide submitted'}
               </button>
             )}
+            {statsButton}
+            {addButton}
             <SyncButton
               onSyncComplete={handleSyncComplete}
               triggerSync={triggerSync}
@@ -696,53 +698,56 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
 
         {/* Main dashboard content — hidden during first-sync onboarding */}
         {!(hasNeverSynced && !isSyncing) && (
-          <>
-            {/* All-clear message when nothing is due today */}
-            {allClearToday && (
-              <div className="all-clear">
-                <div className="all-clear-icon">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
+          <div className="dash-layout">
+            {/* Left: Timeline column */}
+            <div className="dash-main-col">
+              {/* All-clear message when nothing is due today */}
+              {allClearToday && (
+                <div className="all-clear">
+                  <div className="all-clear-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </div>
+                  <p className="all-clear-text">Nothing due today. You&apos;re all caught up!</p>
                 </div>
-                <p className="all-clear-text">Nothing due today. You&apos;re all caught up!</p>
+              )}
+
+              {/* Timeline */}
+              <div className="timeline">
+                {TIMELINE_SECTIONS.map(renderTimelineGroup)}
               </div>
-            )}
 
-            {/* Proactive AI plan card */}
-            <ProactivePlan
-              suggestions={suggestions}
-              assignments={assignments}
-              involvementLevel={involvementLevel}
-              onOpenChat={() => openChatRef.current?.()}
-              onPlanApplied={fetchAssignments}
-              addToast={addToast}
-            />
-
-            {/* AI Briefing panel */}
-            <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
-
-            {/* Timeline */}
-            <div className="timeline">
-              {TIMELINE_SECTIONS.map(renderTimelineGroup)}
+              {/* Empty state when no assignments at all */}
+              {assignments.length === 0 && !hasNeverSynced && (
+                <div className="empty-state">
+                  <div className="empty-state-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="16" y1="13" x2="8" y2="13" />
+                      <line x1="16" y1="17" x2="8" y2="17" />
+                    </svg>
+                  </div>
+                  <h3 className="empty-state-title">No assignments found</h3>
+                  <p className="empty-state-desc">Try syncing again or check your Canvas courses.</p>
+                </div>
+              )}
             </div>
 
-            {/* Empty state when no assignments at all */}
-            {assignments.length === 0 && !hasNeverSynced && (
-              <div className="empty-state">
-                <div className="empty-state-icon">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                  </svg>
-                </div>
-                <h3 className="empty-state-title">No assignments found</h3>
-                <p className="empty-state-desc">Try syncing again or check your Canvas courses.</p>
-              </div>
-            )}
-          </>
+            {/* Right: AI sidebar */}
+            <div className="dash-side-col">
+              <ProactivePlan
+                suggestions={suggestions}
+                assignments={assignments}
+                involvementLevel={involvementLevel}
+                onOpenChat={() => openChatRef.current?.()}
+                onPlanApplied={fetchAssignments}
+                addToast={addToast}
+              />
+              <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
+            </div>
+          </div>
         )}
       </main>
 
