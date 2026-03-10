@@ -106,12 +106,18 @@ class CanvasClient:
         url = f"{self.base_url}/api/v1/courses"
         params = {
             "enrollment_state": "active",
-            "enrollment_type[]": "student",   # student only — exclude TA/teacher roles
+            "include[]": "enrollments",
             "per_page": "100",
         }
         courses = self._paginate(url, params)
-        # Only return courses with an actual name (filter phantom enrollments)
-        courses = [c for c in courses if c.get("name")]
+        # Filter to student enrollments only (exclude TA/teacher/observer) and named courses
+        courses = [
+            c for c in courses
+            if c.get("name") and any(
+                e.get("type") == "StudentEnrollment"
+                for e in (c.get("enrollments") or [])
+            )
+        ]
         logger.info(f"Canvas: found {len(courses)} active student courses")
         return courses
 
