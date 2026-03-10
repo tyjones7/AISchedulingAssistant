@@ -266,7 +266,7 @@ function AssignmentCard({
               target="_blank"
               rel="noopener noreferrer"
               className="quick-action-btn action-open"
-              title={assignment.source === 'canvas' ? 'Open in Canvas' : 'Open in Learning Suite'}
+              title="Open in Canvas"
               onClick={(e) => e.stopPropagation()}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

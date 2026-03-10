@@ -1,7 +1,7 @@
 """
-Sync Service for Learning Suite
+Canvas Sync Service
 
-Orchestrates the sync process with thread-safe status tracking for polling.
+Orchestrates Canvas assignment sync with thread-safe status tracking for polling.
 """
 
 import os
@@ -15,8 +15,6 @@ import logging
 from dotenv import load_dotenv
 from supabase import create_client
 
-from scraper.learning_suite_scraper import LearningSuiteScraper
-import auth_store
 import canvas_auth_store
 
 load_dotenv()
@@ -187,141 +185,23 @@ class SyncService:
                 logger.info(f"Sync [{task_id[:8]}]: {status.value} - {message}")
 
     def _run_sync(self, task_id: str, user_id: str):
-        """Run the sync process in a background thread.
-
-        Includes resilience features:
-        - Passes web storage data alongside cookies for better session persistence
-        - If scraping fails with a session error, attempts to re-inject cookies
-          and retry from the failed point (not from scratch)
-        """
+        """Run Canvas sync in a background thread."""
         task = self._tasks.get(task_id)
         if not task:
             return
 
-        scraper = None
-        should_close_scraper = False
-
-        ls_authenticated = auth_store.is_authenticated(user_id)
         canvas_token = canvas_auth_store.get_token(user_id)
 
         if not canvas_token:
             with self._task_lock:
                 task.status = SyncStatus.FAILED
-                task.error = "Canvas not connected. Please connect Canvas first."
+                task.error = "Canvas not connected. Please connect Canvas in Settings."
                 task.message = f"Sync failed: {task.error}"
                 task.completed_at = datetime.now(timezone.utc)
             self._save_sync_metadata(task_id, user_id, "failed", None, task.error)
             return
 
         try:
-            # ---- Learning Suite sync (disabled — Canvas-only mode) ----
-            if False and ls_authenticated:
-                self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Checking authentication...")
-                logger.info(f"Sync [{task_id[:8]}] user={user_id[:8]} - Checking for authenticated session...")
-
-                cookies, base_url = auth_store.get_session_data(user_id)
-                local_storage, session_storage = auth_store.get_web_storage(user_id)
-
-                if cookies and base_url:
-                    logger.info(f"Sync [{task_id[:8]}] - Found stored cookies ({len(cookies)}), initializing HTTP-only mode...")
-
-                    self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Restoring session...")
-
-                    scraper = LearningSuiteScraper()
-                    # Inject user_id so the scraper's update_database writes per-user rows
-                    scraper.user_id = user_id
-                    if self.supabase:
-                        scraper.supabase = self.supabase
-                    should_close_scraper = True
-
-                    if not scraper.init_http_only(cookies, base_url):
-                        scraper = None
-                        auth_store.clear_authentication(user_id)
-                        logger.warning(f"Sync [{task_id[:8]}] - LS session expired")
-                        with self._task_lock:
-                            task.warnings.append(
-                                "Learning Suite session expired — please reconnect to re-sync your LS courses."
-                            )
-                    else:
-                        self._update_task(task_id, SyncStatus.SCRAPING, "Session restored, scraping...")
-                else:
-                    # Fallback: no cookies stored (shouldn't happen after login, but handle gracefully)
-                    logger.warning(f"Sync [{task_id[:8]}] - No stored cookies for user {user_id[:8]}, please reconnect")
-                    with self._task_lock:
-                        task.warnings.append(
-                            "Learning Suite session data missing — please reconnect in Settings."
-                        )
-
-                if scraper:
-                    # Define progress callback that updates task fields thread-safely
-                    def progress_callback(current, total, course_name):
-                        with self._task_lock:
-                            task.total_courses = total
-                            task.current_course = current
-                            task.current_course_name = course_name
-                            if current == 0:
-                                task.message = f"Found {total} courses, starting..."
-                            else:
-                                task.message = f"Scraped {course_name} ({current}/{total})"
-                        logger.info(f"Sync [{task_id[:8]}] - Course {current}/{total}: {course_name}")
-
-                    self._update_task(task_id, SyncStatus.SCRAPING, "Scraping assignments from courses...")
-                    try:
-                        assignments = scraper.scrape_all_courses(
-                            progress_callback=progress_callback,
-                            save_per_course=True
-                        )
-                    except Exception as scrape_error:
-                        error_msg = str(scrape_error)
-                        logger.error(f"Sync [{task_id[:8]}] - Scraping error: {error_msg}")
-
-                        is_session_error = any(indicator in error_msg.lower() for indicator in [
-                            "session expired", "please sign in", "cas.byu.edu",
-                            "authentication", "login", "redirected"
-                        ])
-
-                        if is_session_error and cookies and base_url:
-                            logger.info(f"Sync [{task_id[:8]}] - Session error detected, attempting recovery...")
-                            self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Session lost, attempting recovery...")
-
-                            scraper = LearningSuiteScraper()
-                            scraper.user_id = user_id
-                            if self.supabase:
-                                scraper.supabase = self.supabase
-                            should_close_scraper = True
-
-                            if scraper.init_http_only(cookies, base_url):
-                                logger.info(f"Sync [{task_id[:8]}] - Recovery successful, retrying scrape...")
-                                self._update_task(task_id, SyncStatus.SCRAPING, "Recovered, retrying scrape...")
-                                assignments = scraper.scrape_all_courses(
-                                    progress_callback=progress_callback,
-                                    save_per_course=True
-                                )
-                            else:
-                                auth_store.clear_authentication(user_id)
-                                with self._task_lock:
-                                    task.warnings.append(
-                                        "Some Learning Suite courses could not be synced due to a session error."
-                                    )
-                                raise ValueError("Session expired during sync and could not be recovered. Please sign in again.")
-                        else:
-                            raise
-
-                    logger.info(f"Sync [{task_id[:8]}] - Scraped {len(assignments)} LS assignments")
-
-                    # Aggregate per-course DB results
-                    total_new = 0
-                    total_modified = 0
-                    for db_result in getattr(scraper, '_per_course_db_results', []):
-                        total_new += db_result.get("new", 0)
-                        total_modified += db_result.get("modified", 0)
-
-                    with self._task_lock:
-                        courses = set(a.get("course_name") for a in assignments if a.get("course_name"))
-                        task.courses_scraped = len(courses)
-                        task.assignments_added = total_new
-                        task.assignments_updated = total_modified
-
             # ---- Canvas sync ----
             if canvas_token:
                 self._update_task(task_id, SyncStatus.SCRAPING, "Fetching Canvas assignments...")

@@ -53,7 +53,7 @@ function AuthPage({ onAuthSuccess }) {
         <div className="auth-brand">
           <div className="auth-logo">C</div>
           <h1 className="auth-app-name">CampusAI</h1>
-          <p className="auth-tagline">AI-powered scheduling for BYU students</p>
+          <p className="auth-tagline">AI-powered assignment scheduling</p>
         </div>
 
         <div className="auth-card">
@@ -148,7 +148,7 @@ function AuthPage({ onAuthSuccess }) {
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
           </svg>
-          Your BYU credentials stay on your device.
+          Your data is encrypted and private.
         </p>
       </div>
     </div>

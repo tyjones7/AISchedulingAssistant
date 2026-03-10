@@ -604,7 +604,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               onSyncStarted={handleSyncStarted}
               onSyncProgress={handleSyncProgress}
             />
-            {logoutButton}
+            {settingsButton}
           </div>
         </div>
       </header>
@@ -657,7 +657,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               </svg>
             </div>
             <h2 className="onboarding-heading">Your courses aren&apos;t synced yet</h2>
-            <p className="onboarding-desc">Sync your Learning Suite and Canvas courses to see all your assignments in one place.</p>
+            <p className="onboarding-desc">Sync your Canvas courses to see all your assignments in one place.</p>
             <button
               className="btn btn-primary onboarding-sync-btn"
               onClick={() => setTriggerSync(true)}
@@ -712,7 +712,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
                   </svg>
                 </div>
                 <h3 className="empty-state-title">No assignments found</h3>
-                <p className="empty-state-desc">Try syncing again or check your Learning Suite / Canvas courses.</p>
+                <p className="empty-state-desc">Try syncing again or check your Canvas courses.</p>
               </div>
             )}
           </>
