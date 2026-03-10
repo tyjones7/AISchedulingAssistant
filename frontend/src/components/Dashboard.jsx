@@ -45,11 +45,6 @@ const TIMELINE_SECTIONS = [
   { key: 'later', label: 'Later', urgency: 'normal', collapsible: true },
 ]
 
-const INVOLVEMENT_OPTIONS = [
-  { value: 'proactive',   label: 'Proactive' },
-  { value: 'balanced',    label: 'Balanced' },
-  { value: 'prompt_only', label: 'On demand' },
-]
 
 function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, onPreferencesChange }) {
   const [assignments, setAssignments] = useState([])
@@ -89,20 +84,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   const involvementLevel = preferences?.involvement_level ?? 'balanced'
   const openChatRef = useRef(null)
 
-  const handleInvolvementChange = async (level) => {
-    try {
-      const res = await authFetch(`${API_BASE}/preferences`, {
-        method: 'POST',
-        body: JSON.stringify({ involvement_level: level }),
-      })
-      if (res.ok) {
-        const updated = await res.json()
-        onPreferencesChange?.(updated)
-      }
-    } catch {
-      addToast('Failed to save preference.', 'error')
-    }
-  }
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now()

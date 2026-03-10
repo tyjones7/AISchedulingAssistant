@@ -6,6 +6,7 @@ function AIBriefing({ briefing, isGenerating }) {
 
   // Auto-expand when briefing first arrives
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (briefing) setCollapsed(false)
   }, [briefing])
 

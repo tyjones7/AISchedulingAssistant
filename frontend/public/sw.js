@@ -1,3 +1,4 @@
+/* global clients */
 // CampusAI Service Worker — handles background push notifications
 
 self.addEventListener('push', (event) => {

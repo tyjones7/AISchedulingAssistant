@@ -32,7 +32,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
     if (triggerSync && !syncing) {
       handleSync() // handleSync() already calls onSyncStarted internally
     }
-  }, [triggerSync, syncing])
+  }, [triggerSync, syncing]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!taskId || !syncing) return
@@ -116,7 +116,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
     pollStatus()
 
     return () => clearInterval(interval)
-  }, [taskId, syncing, onSyncComplete])
+  }, [taskId, syncing, onSyncComplete]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchLastSync = async () => {
     try {
