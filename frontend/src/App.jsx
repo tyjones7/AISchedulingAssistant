@@ -84,17 +84,17 @@ function App() {
 
   const checkBYUAuth = async () => {
     try {
-      const response = await authFetch(`${API_BASE}/auth/status`)
+      const response = await authFetch(`${API_BASE}/auth/canvas-status`)
       if (response.ok) {
         const data = await response.json()
-        const connected = data.authenticated || data.canvas_connected
+        const connected = !!data.connected
         setIsBYUConnected(connected)
         if (connected) loadPreferences()
       } else {
         setIsBYUConnected(false)
       }
     } catch (err) {
-      console.error('[App] Error checking BYU auth status:', err)
+      console.error('[App] Error checking Canvas auth status:', err)
       setIsBYUConnected(false)
     } finally {
       setIsLoading(false)

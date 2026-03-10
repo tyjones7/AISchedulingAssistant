@@ -2,49 +2,23 @@ import { useState, useEffect } from 'react'
 import { authFetch, API_BASE } from '../lib/api'
 import './LoginPage.css'
 
-const POLL_INTERVAL = 2000
-
 function LoginPage({ onLoginSuccess }) {
-  const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState(null)
-  const [error, setError] = useState(null)
-  const [taskId, setTaskId] = useState(null)
-
-  // Canvas state
   const [canvasToken, setCanvasToken] = useState('')
   const [canvasLoading, setCanvasLoading] = useState(false)
   const [canvasConnected, setCanvasConnected] = useState(false)
   const [canvasUser, setCanvasUser] = useState(null)
   const [canvasError, setCanvasError] = useState(null)
 
-  const [netid, setNetid] = useState('')
-  const [password, setPassword] = useState('')
-  const [duoCode, setDuoCode] = useState('')
-  const [duoSubmitting, setDuoSubmitting] = useState(false)
-
-  // LS connected state
-  const [lsConnected, setLsConnected] = useState(false)
-
   // Check existing connection status on mount
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const resp = await authFetch(`${API_BASE}/auth/status`)
+        const resp = await authFetch(`${API_BASE}/auth/canvas-status`)
         if (resp.ok) {
           const data = await resp.json()
-          if (data.authenticated) setLsConnected(true)
-          if (data.canvas_connected) {
+          if (data.connected) {
             setCanvasConnected(true)
-            // Fetch Canvas user name
-            try {
-              const canvasResp = await authFetch(`${API_BASE}/auth/canvas-status`)
-              if (canvasResp.ok) {
-                const canvasData = await canvasResp.json()
-                if (canvasData.user_name) setCanvasUser(canvasData.user_name)
-              }
-            } catch {
-              // Non-critical
-            }
+            if (data.user_name) setCanvasUser(data.user_name)
           }
         }
       } catch {
@@ -53,89 +27,6 @@ function LoginPage({ onLoginSuccess }) {
     }
     checkStatus()
   }, [])
-
-  // Poll for LS login status when we have a task
-  useEffect(() => {
-    if (!taskId || !loading) return
-
-    const pollStatus = async () => {
-      try {
-        const response = await authFetch(`${API_BASE}/auth/browser-status/${taskId}`)
-        if (!response.ok) {
-          throw new Error('Failed to check login status')
-        }
-        const data = await response.json()
-        setStatus(data.status)
-
-        if (data.status === 'authenticated') {
-          setTaskId(null)
-          setLsConnected(true)
-          setTimeout(() => {
-            setLoading(false)
-          }, 800)
-        } else if (data.status === 'failed') {
-          setLoading(false)
-          setTaskId(null)
-          setError(data.error || 'Login failed. Please try again.')
-        }
-      } catch (err) {
-        console.error('[LoginPage] Error polling status:', err)
-      }
-    }
-
-    const interval = setInterval(pollStatus, POLL_INTERVAL)
-    pollStatus()
-
-    return () => clearInterval(interval)
-  }, [taskId, loading])
-
-  const handleBYULogin = async (e) => {
-    e.preventDefault()
-    if (!netid.trim() || !password) return
-
-    setLoading(true)
-    setError(null)
-    setStatus('opening')
-
-    try {
-      const response = await authFetch(`${API_BASE}/auth/ls-credentials`, {
-        method: 'POST',
-        body: JSON.stringify({ netid: netid.trim(), password }),
-      })
-
-      if (!response.ok) {
-        let msg = 'Failed to start login'
-        try { const d = await response.json(); msg = d.detail || msg } catch {}
-        throw new Error(msg)
-      }
-
-      const data = await response.json()
-      setPassword('')
-      setTaskId(data.task_id)
-      setStatus('waiting_for_mfa')
-    } catch (err) {
-      console.error('[LoginPage] Login error:', err)
-      setError(err.message || 'Failed to connect to server')
-      setLoading(false)
-    }
-  }
-
-  const handleDuoSubmit = async (e) => {
-    e.preventDefault()
-    if (!duoCode.trim() || !taskId) return
-    setDuoSubmitting(true)
-    try {
-      await authFetch(`${API_BASE}/auth/ls-duo-passcode/${taskId}`, {
-        method: 'POST',
-        body: JSON.stringify({ code: duoCode.trim() }),
-      })
-      setDuoCode('')
-    } catch (err) {
-      console.error('[LoginPage] Duo submit error:', err)
-    } finally {
-      setDuoSubmitting(false)
-    }
-  }
 
   const handleCanvasConnect = async () => {
     const token = canvasToken.trim()
@@ -166,114 +57,16 @@ function LoginPage({ onLoginSuccess }) {
     }
   }
 
-  const handleContinue = () => {
-    onLoginSuccess()
-  }
-
-  const anyConnected = lsConnected || canvasConnected
-
-  const getStatusMessage = () => {
-    switch (status) {
-      case 'opening': return 'Opening browser...'
-      case 'waiting_for_login': return 'Logging in to BYU...'
-      case 'waiting_for_mfa': return 'Check your BYU app and approve the login request'
-      case 'authenticated': return 'Login successful!'
-      default: return 'Connecting...'
-    }
-  }
-
   return (
     <div className="login-page">
       <div className="login-container">
         <div className="login-header">
           <div className="login-logo">C</div>
           <h1 className="login-title">CampusAI</h1>
-          <p className="login-subtitle">Connect your BYU accounts to manage assignments</p>
+          <p className="login-subtitle">Connect your Canvas account to get started</p>
         </div>
 
         <div className="login-content">
-          {error && (
-            <div className="login-error">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              {error}
-            </div>
-          )}
-
-          {/* BYU Learning Suite Card */}
-          <div className={`connection-card ${lsConnected ? 'is-connected' : ''}`}>
-            <div className="connection-card-header">
-              <span className="connection-label">BYU Learning Suite</span>
-              {lsConnected && <span className="connected-badge">Connected</span>}
-            </div>
-
-            {!lsConnected && (
-              <>
-                {loading && status ? (
-                  <div className={`login-status ${status === 'authenticated' ? 'login-success' : ''}`}>
-                    {status === 'authenticated' ? (
-                      <span className="success-check-wrap">
-                        <svg className="success-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      </span>
-                    ) : (
-                      <span className="status-spinner" />
-                    )}
-                    <span className="status-message">{getStatusMessage()}</span>
-                  </div>
-                ) : null}
-
-                {!loading && !status && (
-                  <form className="ls-credentials-form" onSubmit={handleBYULogin}>
-                    <div className="ls-field">
-                      <label className="ls-label" htmlFor="byu-netid">BYU NetID</label>
-                      <input
-                        id="byu-netid"
-                        type="text"
-                        className="ls-input"
-                        placeholder="e.g. tjones42"
-                        value={netid}
-                        onChange={(e) => setNetid(e.target.value)}
-                        autoComplete="username"
-                        required
-                      />
-                    </div>
-                    <div className="ls-field">
-                      <label className="ls-label" htmlFor="byu-password">BYU Password</label>
-                      <input
-                        id="byu-password"
-                        type="password"
-                        className="ls-input"
-                        placeholder="Your BYU password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        autoComplete="current-password"
-                        required
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="byu-login-button"
-                      disabled={!netid.trim() || !password}
-                    >
-                      Connect Learning Suite
-                    </button>
-                    <p className="credentials-privacy-note">
-                      🔒 Your password is sent directly to BYU's login page — the same way you'd log in yourself. It is never stored anywhere and is discarded the moment BYU confirms your identity. We only keep your BYU session cookie (not your password) to sync your assignments.
-                    </p>
-                    <p className="credentials-privacy-note" style={{marginTop: '8px', opacity: 0.7}}>
-                      Using Touch ID or computer fingerprint for Duo? That can't work on a remote server. Run <code style={{fontSize: '11px', background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px'}}>python3 backend/import_ls_session.py</code> locally instead.
-                    </p>
-                  </form>
-                )}
-              </>
-            )}
-          </div>
-
           {/* Canvas LMS Card */}
           <div className={`connection-card ${canvasConnected ? 'is-connected' : ''}`}>
             <div className="connection-card-header">
@@ -282,9 +75,18 @@ function LoginPage({ onLoginSuccess }) {
             </div>
 
             {canvasConnected ? (
-              <p className="canvas-connected-info">
-                {canvasUser ? `Signed in as ${canvasUser}` : 'Token validated'}
-              </p>
+              <>
+                <p className="canvas-connected-info">
+                  {canvasUser ? `Signed in as ${canvasUser}` : 'Token validated'}
+                </p>
+                <button
+                  type="button"
+                  className="continue-button"
+                  onClick={onLoginSuccess}
+                >
+                  Continue to Dashboard
+                </button>
+              </>
             ) : (
               <>
                 {canvasError && (
@@ -299,6 +101,7 @@ function LoginPage({ onLoginSuccess }) {
                     onChange={(e) => setCanvasToken(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleCanvasConnect()}
                     disabled={canvasLoading}
+                    autoFocus
                   />
                   <button
                     className="canvas-connect-btn"
@@ -317,28 +120,11 @@ function LoginPage({ onLoginSuccess }) {
                   >
                     Canvas Settings
                   </a>
-                  {' '}under &quot;Approved Integrations.&quot;
+                  {' '}under &quot;Approved Integrations&quot; → &quot;New Access Token.&quot;
                 </p>
               </>
             )}
           </div>
-
-          {/* Continue button */}
-          {anyConnected && (
-            <button
-              type="button"
-              className="continue-button"
-              onClick={handleContinue}
-            >
-              Continue to Dashboard
-            </button>
-          )}
-
-          {!anyConnected && (
-            <p className="login-instructions">
-              Connect at least one source to get started.
-            </p>
-          )}
         </div>
 
         <div className="login-footer">
@@ -346,7 +132,7 @@ function LoginPage({ onLoginSuccess }) {
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             </svg>
-            Your credentials stay on your device. We never see your passwords.
+            Your token is encrypted and never shared. It only reads your assignments.
           </p>
         </div>
       </div>

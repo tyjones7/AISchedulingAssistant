@@ -204,18 +204,18 @@ class SyncService:
         ls_authenticated = auth_store.is_authenticated(user_id)
         canvas_token = canvas_auth_store.get_token(user_id)
 
-        if not ls_authenticated and not canvas_token:
+        if not canvas_token:
             with self._task_lock:
                 task.status = SyncStatus.FAILED
-                task.error = "Not authenticated. Please connect Learning Suite or Canvas first."
+                task.error = "Canvas not connected. Please connect Canvas first."
                 task.message = f"Sync failed: {task.error}"
                 task.completed_at = datetime.now(timezone.utc)
             self._save_sync_metadata(task_id, user_id, "failed", None, task.error)
             return
 
         try:
-            # ---- Learning Suite sync ----
-            if ls_authenticated:
+            # ---- Learning Suite sync (disabled — Canvas-only mode) ----
+            if False and ls_authenticated:
                 self._update_task(task_id, SyncStatus.CHECKING_SESSION, "Checking authentication...")
                 logger.info(f"Sync [{task_id[:8]}] user={user_id[:8]} - Checking for authenticated session...")
 
@@ -356,8 +356,7 @@ class SyncService:
                     logger.info(f"Sync [{task_id[:8]}] - Canvas: {canvas_result}")
                 except Exception as e:
                     logger.error(f"Sync [{task_id[:8]}] - Canvas sync error: {e}")
-                    if not ls_authenticated:
-                        raise  # Canvas-only sync: propagate error
+                    raise
 
             # Build result summary for metadata
             result = {

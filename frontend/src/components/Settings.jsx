@@ -23,15 +23,8 @@ const INVOLVEMENT_OPTIONS = [
 
 function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [userEmail, setUserEmail] = useState(null)
-  const [lsConnected, setLsConnected] = useState(false)
   const [canvasConnected, setCanvasConnected] = useState(false)
   const [canvasUser, setCanvasUser] = useState(null)
-
-  // BYU reconnect state
-  const [lsReconnecting, setLsReconnecting] = useState(false)
-  const [lsStatus, setLsStatus] = useState(null)
-  const [lsTaskId, setLsTaskId] = useState(null)
-  const [lsError, setLsError] = useState(null)
 
   // Canvas reconnect state
   const [canvasToken, setCanvasToken] = useState('')
@@ -54,16 +47,10 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       if (user) setUserEmail(user.email)
     })
 
-    authFetch(`${API_BASE}/auth/status`).then(async (res) => {
-      if (!res.ok) return
-      const data = await res.json()
-      setLsConnected(!!data.authenticated)
-      setCanvasConnected(!!data.canvas_connected)
-    }).catch(() => {})
-
     authFetch(`${API_BASE}/auth/canvas-status`).then(async (res) => {
       if (!res.ok) return
       const data = await res.json()
+      setCanvasConnected(!!data.connected)
       if (data.user_name) setCanvasUser(data.user_name)
     }).catch(() => {})
   }, [])
@@ -77,50 +64,6 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.work_style) setWorkStyle(preferences.work_style)
     if (preferences.involvement_level) setInvolvementLevel(preferences.involvement_level)
   }, [preferences])
-
-  // Poll for BYU login completion
-  useEffect(() => {
-    if (!lsTaskId || !lsReconnecting) return
-    const poll = async () => {
-      try {
-        const res = await authFetch(`${API_BASE}/auth/browser-status/${lsTaskId}`)
-        if (!res.ok) return
-        const data = await res.json()
-        setLsStatus(data.status)
-        if (data.status === 'authenticated') {
-          setLsTaskId(null)
-          setLsConnected(true)
-          setTimeout(() => setLsReconnecting(false), 800)
-        } else if (data.status === 'failed') {
-          setLsReconnecting(false)
-          setLsTaskId(null)
-          setLsError(data.error || 'Login failed. Please try again.')
-        }
-      } catch { /* ignore */ }
-    }
-    const interval = setInterval(poll, 2000)
-    poll()
-    return () => clearInterval(interval)
-  }, [lsTaskId, lsReconnecting])
-
-  const handleLsReconnect = async () => {
-    setLsReconnecting(true)
-    setLsError(null)
-    setLsStatus('opening')
-    try {
-      const res = await authFetch(`${API_BASE}/auth/browser-login`, { method: 'POST' })
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.detail || 'Failed to open login')
-      }
-      const data = await res.json()
-      setLsTaskId(data.task_id)
-      setLsStatus('waiting_for_login')
-    } catch (err) {
-      setLsError(err.message || 'Failed to connect')
-      setLsReconnecting(false)
-    }
-  }
 
   const handleCanvasConnect = async () => {
     const token = canvasToken.trim()
@@ -175,16 +118,6 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     }
   }
 
-  const getLsStatusMessage = () => {
-    switch (lsStatus) {
-      case 'opening': return 'Opening browser...'
-      case 'waiting_for_login': return 'Complete login in the browser window...'
-      case 'waiting_for_mfa': return 'Complete Duo MFA...'
-      case 'authenticated': return 'Connected!'
-      default: return 'Connecting...'
-    }
-  }
-
   // Close on escape key
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
@@ -224,30 +157,6 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                 Sign Out
               </button>
             </div>
-          </section>
-
-          {/* Learning Suite Section */}
-          <section className="settings-section">
-            <h3 className="settings-section-title">BYU Learning Suite</h3>
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <span className="settings-row-label">Status</span>
-                <span className={`settings-connection-badge ${lsConnected ? 'is-connected' : 'is-disconnected'}`}>
-                  {lsConnected ? 'Connected' : 'Not connected'}
-                </span>
-              </div>
-              {!lsReconnecting ? (
-                <button className="settings-action-btn" onClick={handleLsReconnect}>
-                  {lsConnected ? 'Reconnect' : 'Connect'}
-                </button>
-              ) : (
-                <span className="settings-status-text">
-                  <span className="settings-spinner" />
-                  {getLsStatusMessage()}
-                </span>
-              )}
-            </div>
-            {lsError && <p className="settings-error">{lsError}</p>}
           </section>
 
           {/* Canvas Section */}
