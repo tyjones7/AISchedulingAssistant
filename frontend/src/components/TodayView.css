@@ -1,0 +1,255 @@
+.today-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-bottom: 2rem;
+}
+
+.today-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.today-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.today-subtitle {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin: 0.2rem 0 0;
+}
+
+/* Sections */
+.today-section {}
+
+.today-section-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #9ca3af;
+  margin: 0 0 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.today-section-label--overdue {
+  color: #ef4444;
+}
+
+.today-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Overdue list */
+.today-overdue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.today-overdue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: #fff5f5;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  gap: 0.75rem;
+}
+
+.today-overdue-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #7f1d1d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-overdue-course {
+  font-size: 0.75rem;
+  color: #b91c1c;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Loading / empty */
+.today-loading {
+  text-align: center;
+  padding: 2rem;
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.today-empty {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.today-empty-hint {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  margin-top: 0.4rem;
+}
+
+/* Block list */
+.today-block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.today-block {
+  display: flex;
+  align-items: stretch;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+
+.today-block:not(.is-done):not(.is-skipped):hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.today-block.is-done {
+  opacity: 0.5;
+}
+
+.today-block.is-skipped {
+  opacity: 0.45;
+}
+
+.today-block-accent {
+  width: 4px;
+  flex-shrink: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.today-block-body {
+  flex: 1;
+  padding: 0.6rem 0.8rem;
+  min-width: 0;
+}
+
+.today-block-time {
+  font-size: 0.72rem;
+  color: #6b7280;
+  margin-bottom: 0.15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.today-block-dur {
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.67rem;
+  color: #9ca3af;
+}
+
+.today-block-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.today-block-course {
+  font-size: 0.72rem;
+  color: #6b7280;
+  margin-top: 0.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Actions */
+.today-block-actions {
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0.5rem;
+  gap: 0.25rem;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.today-action {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1.5px solid #e5e7eb;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+
+.today-action--done {
+  color: #16a34a;
+}
+
+.today-action--done:hover {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.today-action--skip {
+  color: #9ca3af;
+}
+
+.today-action--skip:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+/* Badges */
+.today-badge {
+  align-self: center;
+  margin-right: 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 20px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.today-badge--done {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #86efac;
+}
+
+.today-badge--skip {
+  background: #f9fafb;
+  color: #9ca3af;
+  border: 1px solid #e5e7eb;
+}

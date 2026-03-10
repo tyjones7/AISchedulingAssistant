@@ -32,6 +32,7 @@ class AssignmentUpdate(BaseModel):
     title: Optional[str] = None
     course_name: Optional[str] = None
     due_date: Optional[str] = None
+    task_type: Optional[Literal['assignment', 'exam_prep', 'reading', 'personal', 'other']] = None
 
 
 class AssignmentCreate(BaseModel):
@@ -40,7 +41,15 @@ class AssignmentCreate(BaseModel):
     due_date: str  # ISO datetime string
     point_value: Optional[float] = None
     assignment_type: Optional[str] = None
+    task_type: Optional[Literal['assignment', 'exam_prep', 'reading', 'personal', 'other']] = None
+    estimated_minutes: Optional[int] = None
     notes: Optional[str] = None
+
+
+class TimeBlockUpdate(BaseModel):
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    status: Optional[Literal['planned', 'completed', 'skipped']] = None
 
 
 class SyncStartResponse(BaseModel):
@@ -120,6 +129,8 @@ class UserPreferences(BaseModel):
     work_style: Literal["spread_out", "batch"] = "spread_out"
     involvement_level: Literal["proactive", "balanced", "prompt_only"] = "balanced"
     weekly_schedule: Optional[list] = None
+    work_start: Optional[str] = "08:00"
+    work_end: Optional[str] = "22:00"
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -129,6 +140,8 @@ class UserPreferencesUpdate(BaseModel):
     work_style: Optional[Literal["spread_out", "batch"]] = None
     involvement_level: Optional[Literal["proactive", "balanced", "prompt_only"]] = None
     weekly_schedule: Optional[list] = None
+    work_start: Optional[str] = None
+    work_end: Optional[str] = None
 
 
 load_dotenv()
@@ -317,6 +330,10 @@ def create_assignment(
         insert_data["point_value"] = data.point_value
     if data.assignment_type:
         insert_data["assignment_type"] = data.assignment_type
+    if data.task_type:
+        insert_data["task_type"] = data.task_type
+    if data.estimated_minutes:
+        insert_data["estimated_minutes"] = data.estimated_minutes
     if data.notes:
         insert_data["notes"] = data.notes
 
@@ -367,6 +384,8 @@ def update_assignment(
         update_data["course_name"] = update.course_name
     if update.due_date is not None:
         update_data["due_date"] = update.due_date
+    if update.task_type is not None:
+        update_data["task_type"] = update.task_type
 
     if update.estimated_minutes is not None and not (1 <= update.estimated_minutes <= 1440):
         raise HTTPException(status_code=422, detail="estimated_minutes must be between 1 and 1440")
@@ -390,6 +409,16 @@ def update_assignment(
         raise HTTPException(status_code=404, detail="Assignment not found")
 
     return {"assignment": response.data[0]}
+
+
+@app.delete("/assignments/{assignment_id}", status_code=204)
+def delete_assignment(assignment_id: str, user_id: str = Depends(get_current_user)):
+    """Permanently delete an assignment and all its time blocks."""
+    result = supabase_service.table("assignments").delete().eq(
+        "id", assignment_id
+    ).eq("user_id", user_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Assignment not found")
 
 
 @app.post("/assignments/dismiss-overdue")
@@ -492,6 +521,114 @@ def save_preferences(body: UserPreferencesUpdate, user_id: str = Depends(get_cur
     except Exception as e:
         logger.error(f"POST /preferences failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save preferences: {e}")
+
+
+# ============== SCHEDULE ROUTES ==============
+
+@app.post("/schedule/generate")
+def generate_schedule_endpoint(user_id: str = Depends(get_current_user)):
+    """Delete all planned blocks for the user, then generate a fresh 7-day schedule."""
+    from schedule_service import generate_schedule
+
+    # Remove existing planned blocks only (keep completed/skipped for history)
+    supabase_service.table("time_blocks").delete().eq(
+        "user_id", user_id
+    ).eq("status", "planned").execute()
+
+    result = generate_schedule(user_id, supabase_service)
+
+    if result["blocks"]:
+        supabase_service.table("time_blocks").insert(result["blocks"]).execute()
+
+    # Return saved blocks with assignment info joined
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    week_end = (_date.today() + timedelta(days=7)).isoformat()
+    saved = supabase_service.table("time_blocks").select(
+        "*, assignments(title, course_name, task_type, estimated_minutes)"
+    ).eq("user_id", user_id).gte("date", today).lt("date", week_end).order("start_time").execute()
+
+    return {
+        "blocks": saved.data or [],
+        "overbooked": result["overbooked"],
+        "total_blocks": len(result["blocks"]),
+    }
+
+
+@app.get("/schedule/week")
+def get_week_schedule(
+    week_start: Optional[str] = Query(default=None),
+    user_id: str = Depends(get_current_user),
+):
+    """Return time blocks + assignment info for a given week (defaults to current Mon–Sun)."""
+    from datetime import date as _date
+    from zoneinfo import ZoneInfo
+    mountain = ZoneInfo("America/Denver")
+
+    if week_start:
+        try:
+            start = datetime.strptime(week_start, "%Y-%m-%d").date()
+        except ValueError:
+            start = datetime.now(mountain).date()
+    else:
+        start = datetime.now(mountain).date()
+
+    # Snap to Monday
+    start = start - timedelta(days=start.weekday())
+    end = start + timedelta(days=7)
+
+    blocks = supabase_service.table("time_blocks").select(
+        "*, assignments(title, course_name, task_type, estimated_minutes)"
+    ).eq("user_id", user_id).gte("date", start.isoformat()).lt(
+        "date", end.isoformat()
+    ).order("start_time").execute()
+
+    return {
+        "blocks": blocks.data or [],
+        "week_start": start.isoformat(),
+        "week_end": end.isoformat(),
+    }
+
+
+@app.post("/schedule/approve")
+def approve_schedule(user_id: str = Depends(get_current_user)):
+    """Mark all planned blocks as approved (plan_version 2)."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    supabase_service.table("time_blocks").update({"plan_version": 2}).eq(
+        "user_id", user_id
+    ).eq("status", "planned").execute()
+    return {"approved": True, "approved_at": now_iso}
+
+
+@app.patch("/time-blocks/{block_id}")
+def update_time_block(
+    block_id: str,
+    data: TimeBlockUpdate,
+    user_id: str = Depends(get_current_user),
+):
+    """Update a time block's times or status (used for drag-drop and done/skip)."""
+    update_data = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    result = supabase_service.table("time_blocks").update(update_data).eq(
+        "id", block_id
+    ).eq("user_id", user_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Block not found")
+
+    return {"block": result.data[0]}
+
+
+@app.delete("/time-blocks/{block_id}", status_code=204)
+def delete_time_block(block_id: str, user_id: str = Depends(get_current_user)):
+    """Remove a time block without deleting the underlying task."""
+    result = supabase_service.table("time_blocks").delete().eq(
+        "id", block_id
+    ).eq("user_id", user_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Block not found")
 
 
 # ============== AI ROUTES ==============

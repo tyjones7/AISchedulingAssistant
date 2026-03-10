@@ -357,8 +357,49 @@
   align-items: start;
 }
 
+.dash-layout--full {
+  grid-template-columns: 1fr;
+}
+
 .dash-main-col {
   min-width: 0;
+}
+
+.dash-full-col {
+  min-width: 0;
+}
+
+/* Tab nav */
+.dash-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.dash-tab {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.dash-tab:hover {
+  color: #374151;
+}
+
+.dash-tab.is-active {
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
 .dash-side-col {

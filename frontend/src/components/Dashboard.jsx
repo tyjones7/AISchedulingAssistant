@@ -8,6 +8,8 @@ import ProactivePlan from './ProactivePlan'
 import Settings from './Settings'
 import StatsPanel from './StatsPanel'
 import AddAssignmentModal from './AddAssignmentModal'
+import TodayView from './TodayView'
+import WeeklyGrid from './WeeklyGrid'
 import { ToastContainer } from './Toast'
 import { authFetch, API_BASE } from '../lib/api'
 import './Dashboard.css'
@@ -69,6 +71,9 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
 
   // Later section collapsed by default
   const [laterCollapsed, setLaterCollapsed] = useState(true)
+
+  // View tabs: 'timeline' | 'today' | 'weekly'
+  const [activeTab, setActiveTab] = useState('timeline')
 
   // Hide submitted toggle — persisted in localStorage
   const [hideSubmitted, setHideSubmitted] = useState(() => {
@@ -565,6 +570,15 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
             <div className="brand-logo">C</div>
             <span className="brand-name">CampusAI</span>
           </div>
+          <nav className="dash-tabs">
+            {[['timeline','Timeline'],['today','Today'],['weekly','Weekly']].map(([key,label]) => (
+              <button
+                key={key}
+                className={`dash-tab ${activeTab === key ? 'is-active' : ''}`}
+                onClick={() => setActiveTab(key)}
+              >{label}</button>
+            ))}
+          </nav>
           <div className="dash-header-actions">
             <button
               className="ai-plan-btn"
@@ -663,9 +677,21 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
 
         {/* Main dashboard content — hidden during first-sync onboarding */}
         {!(hasNeverSynced && !isSyncing) && (
-          <div className="dash-layout">
+          <div className={`dash-layout ${activeTab !== 'timeline' ? 'dash-layout--full' : ''}`}>
+            {/* Today tab */}
+            {activeTab === 'today' && (
+              <div className="dash-full-col">
+                <TodayView assignments={assignments} addToast={addToast} />
+              </div>
+            )}
+            {/* Weekly tab */}
+            {activeTab === 'weekly' && (
+              <div className="dash-full-col">
+                <WeeklyGrid preferences={preferences} addToast={addToast} />
+              </div>
+            )}
             {/* Left: Timeline column */}
-            <div className="dash-main-col">
+            {activeTab === 'timeline' && <div className="dash-main-col">
               {/* All-clear message when nothing is due today */}
               {allClearToday && (
                 <div className="all-clear">
@@ -698,10 +724,10 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
                   <p className="empty-state-desc">Try syncing again or check your Canvas courses.</p>
                 </div>
               )}
-            </div>
+            </div>}
 
-            {/* Right: AI sidebar */}
-            <div className="dash-side-col">
+            {/* Right: AI sidebar — only on timeline tab */}
+            {activeTab === 'timeline' && <div className="dash-side-col">
               <ProactivePlan
                 suggestions={suggestions}
                 assignments={assignments}
@@ -711,7 +737,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
                 addToast={addToast}
               />
               <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
-            </div>
+            </div>}
           </div>
         )}
       </main>
