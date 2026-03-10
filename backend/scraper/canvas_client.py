@@ -107,12 +107,12 @@ class CanvasClient:
         params = {
             "enrollment_state": "active",
             "enrollment_type[]": "student",   # student only — exclude TA/teacher roles
-            "state[]": ["available", "unpublished"],  # available = published and active
+            "state[]": "available",  # available = published and active
             "per_page": "100",
         }
         courses = self._paginate(url, params)
         # Only return courses with an actual name (filter phantom enrollments)
-        courses = [c for c in courses if c.get("name") and c.get("workflow_state") in ("available", "unpublished")]
+        courses = [c for c in courses if c.get("name") and c.get("workflow_state") == "available"]
         logger.info(f"Canvas: found {len(courses)} active student courses")
         return courses
 
