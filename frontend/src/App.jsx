@@ -1,6 +1,5 @@
 import { useState, useEffect, Component } from 'react'
 import Dashboard from './components/Dashboard'
-import LoginPage from './components/LoginPage'
 import AuthPage from './components/AuthPage'
 import OnboardingSurvey from './components/OnboardingSurvey'
 import { registerPushNotifications, isPushSupported, getPushPermission } from './utils/pushNotifications'
@@ -37,18 +36,14 @@ class ErrorBoundary extends Component {
 }
 
 function App() {
-  // null = loading, false = no session, object = session
   const [session, setSession] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
-
-  // Whether BYU Learning Suite or Canvas is connected (backend auth)
-  const [isBYUConnected, setIsBYUConnected] = useState(false)
-
+  const [isCanvasConnected, setIsCanvasConnected] = useState(false)
   const [shouldSync, setShouldSync] = useState(false)
-  const [preferences, setPreferences] = useState(null)   // null = not yet loaded
-  const [showSurvey, setShowSurvey] = useState(false)
+  const [preferences, setPreferences] = useState(null)
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
-  // Keep-alive ping every 14 minutes to prevent Render free tier from sleeping
+  // Keep-alive ping every 14 minutes
   useEffect(() => {
     const ping = () => fetch(`${API_BASE}/ping`).catch(() => {})
     ping()
@@ -56,12 +51,12 @@ function App() {
     return () => clearInterval(interval)
   }, [])
 
-  // On mount: check existing Supabase session and subscribe to auth changes
+  // On mount: check session and subscribe to auth changes
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      setSession(initialSession)
-      if (initialSession) {
-        checkBYUAuth()
+    supabase.auth.getSession().then(({ data: { session: initial } }) => {
+      setSession(initial)
+      if (initial) {
+        initUserState()
       } else {
         setIsLoading(false)
       }
@@ -70,11 +65,11 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
       if (newSession) {
-        checkBYUAuth()
+        initUserState()
       } else {
-        setIsBYUConnected(false)
+        setIsCanvasConnected(false)
         setPreferences(null)
-        setShowSurvey(false)
+        setShowOnboarding(false)
         setIsLoading(false)
       }
     })
@@ -82,101 +77,90 @@ function App() {
     return () => subscription.unsubscribe()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const checkBYUAuth = async () => {
+  const initUserState = async () => {
     try {
-      const response = await authFetch(`${API_BASE}/auth/canvas-status`)
-      if (response.ok) {
-        const data = await response.json()
-        const connected = !!data.connected
-        setIsBYUConnected(connected)
-        if (connected) loadPreferences()
-      } else {
-        setIsBYUConnected(false)
+      // Check canvas connection and preferences in parallel
+      const [canvasRes, prefsRes] = await Promise.all([
+        authFetch(`${API_BASE}/auth/canvas-status`).catch(() => null),
+        authFetch(`${API_BASE}/preferences`).catch(() => null),
+      ])
+
+      let connected = false
+      if (canvasRes?.ok) {
+        const data = await canvasRes.json()
+        connected = !!data.connected
+        setIsCanvasConnected(connected)
       }
-    } catch (err) {
-      console.error('[App] Error checking Canvas auth status:', err)
-      setIsBYUConnected(false)
+
+      let prefs = null
+      if (prefsRes?.ok) {
+        prefs = await prefsRes.json()
+        setPreferences(prefs)
+      }
+
+      // Show onboarding if canvas not connected OR no preferences saved yet
+      const hasPrefs = !!(prefs?.id)
+      if (!connected || !hasPrefs) {
+        setShowOnboarding(true)
+      } else {
+        // Returning user — re-register push if already granted
+        if (getPushPermission() === 'granted') maybeRegisterPush(prefs)
+      }
+    } catch {
+      // Fall through — show dashboard anyway
     } finally {
       setIsLoading(false)
     }
   }
 
-  const loadPreferences = async () => {
-    try {
-      const res = await authFetch(`${API_BASE}/preferences`)
-      if (res.ok) {
-        const data = await res.json()
-        setPreferences(data)
-        if (!data.id) {
-          // First time — show the onboarding survey
-          setShowSurvey(true)
-        } else {
-          // Returning user — re-register push if they already granted permission
-          if (getPushPermission() === 'granted') maybeRegisterPush(data)
-        }
-      }
-    } catch {
-      setPreferences({}) // fall back to defaults silently
-    }
-  }
-
   const maybeRegisterPush = (prefs) => {
-    if (!prefs) return
-    if (!isPushSupported()) return
+    if (!prefs || !isPushSupported()) return
     if (getPushPermission() === 'denied') return
     const level = prefs.involvement_level ?? 'balanced'
     if (level === 'prompt_only') return
-    // Request push permission for proactive/balanced users
     registerPushNotifications()
   }
 
   const handleAuthSuccess = (newSession) => {
     setSession(newSession)
-    // onAuthStateChange will fire and call checkBYUAuth
+    // onAuthStateChange fires and calls initUserState
   }
 
-  const handleSurveyComplete = (prefs) => {
-    setShowSurvey(false)
+  // Called when onboarding wizard completes
+  // prefs = saved preferences or null if skipped, connected = whether canvas was connected
+  const handleOnboardingComplete = async (prefs, connected) => {
+    setShowOnboarding(false)
     if (prefs) {
       setPreferences(prefs)
       maybeRegisterPush(prefs)
     }
-  }
-
-  const handleLoginSuccess = async () => {
-    setIsBYUConnected(true)
-    loadPreferences()
-    // Only auto-sync if there hasn't been a successful sync in the past 12 hours
-    try {
-      const res = await authFetch(`${API_BASE}/sync/last`)
-      if (res.ok) {
-        const data = await res.json()
-        const lastSync = data.last_sync
-        // Only skip if last sync was successful AND recent
-        if (lastSync?.last_sync_status === 'completed' && lastSync?.last_sync_at) {
-          const diffHours = (Date.now() - new Date(lastSync.last_sync_at).getTime()) / 3600000
-          if (diffHours < 12) return // Recent successful sync — skip auto-sync
+    if (connected) {
+      setIsCanvasConnected(true)
+      // Auto-sync after connecting Canvas for the first time
+      try {
+        const res = await authFetch(`${API_BASE}/sync/last`)
+        if (res.ok) {
+          const data = await res.json()
+          const lastSync = data.last_sync
+          if (lastSync?.last_sync_status === 'completed' && lastSync?.last_sync_at) {
+            const diffHours = (Date.now() - new Date(lastSync.last_sync_at).getTime()) / 3600000
+            if (diffHours < 12) return
+          }
         }
-      }
-    } catch { /* ignore — proceed with sync if check fails */ }
-    setShouldSync(true)
+      } catch { /* proceed with sync */ }
+      setShouldSync(true)
+    }
   }
 
-  const handleSyncTriggered = () => {
-    setShouldSync(false) // Reset after sync is triggered
-  }
+  const handleSyncTriggered = () => setShouldSync(false)
 
   const handleLogout = async () => {
     try {
       await authFetch(`${API_BASE}/auth/logout`, { method: 'POST' })
-    } catch {
-      // Proceed with logout even if backend call fails
-    }
+    } catch { /* proceed */ }
     await supabase.auth.signOut()
-    // onAuthStateChange will fire and reset state
   }
 
-  // Loading state
   if (isLoading) {
     return (
       <ErrorBoundary>
@@ -187,7 +171,6 @@ function App() {
     )
   }
 
-  // No Supabase session — show email/password auth page
   if (!session) {
     return (
       <ErrorBoundary>
@@ -196,19 +179,15 @@ function App() {
     )
   }
 
-  // Supabase session exists but no BYU/Canvas connection — show BYU connect page
-  if (!isBYUConnected) {
-    return (
-      <ErrorBoundary>
-        <LoginPage onLoginSuccess={handleLoginSuccess} />
-      </ErrorBoundary>
-    )
-  }
-
-  // Fully authenticated — show dashboard
+  // Logged in — always show dashboard, onboarding modal overlays on top if needed
   return (
     <ErrorBoundary>
-      {showSurvey && <OnboardingSurvey onComplete={handleSurveyComplete} />}
+      {showOnboarding && (
+        <OnboardingSurvey
+          onComplete={handleOnboardingComplete}
+          isCanvasConnected={isCanvasConnected}
+        />
+      )}
       <Dashboard
         autoSync={shouldSync}
         onSyncTriggered={handleSyncTriggered}

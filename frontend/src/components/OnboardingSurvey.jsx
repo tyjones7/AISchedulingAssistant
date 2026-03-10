@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { authFetch, API_BASE } from '../lib/api'
 import './OnboardingSurvey.css'
 
-const STEPS = [
+const SURVEY_STEPS = [
   {
     id: 'study_time',
     question: 'When do you do your best work?',
@@ -17,10 +17,10 @@ const STEPS = [
     id: 'session_length_minutes',
     question: 'How long do you like to study in one sitting?',
     options: [
-      { value: 30,  label: '30 min',    sub: 'Short bursts' },
-      { value: 60,  label: '1 hour',    sub: 'Focused blocks' },
-      { value: 90,  label: '90 min',    sub: 'Deep work' },
-      { value: 120, label: '2+ hours',  sub: 'Marathon sessions' },
+      { value: 30,  label: '30 min',   sub: 'Short bursts' },
+      { value: 60,  label: '1 hour',   sub: 'Focused blocks' },
+      { value: 90,  label: '90 min',   sub: 'Deep work' },
+      { value: 120, label: '2+ hours', sub: 'Marathon sessions' },
     ],
   },
   {
@@ -45,48 +45,200 @@ const STEPS = [
     id: 'involvement_level',
     question: 'How involved should the AI be?',
     options: [
-      { value: 'proactive',   label: 'Proactive',    sub: 'Suggests plans automatically' },
-      { value: 'balanced',    label: 'Balanced',     sub: 'Nudges near deadlines' },
-      { value: 'prompt_only', label: 'On demand',    sub: 'Only when I ask' },
+      { value: 'proactive',   label: 'Proactive',  sub: 'Suggests plans automatically' },
+      { value: 'balanced',    label: 'Balanced',   sub: 'Nudges near deadlines' },
+      { value: 'prompt_only', label: 'On demand',  sub: 'Only when I ask' },
     ],
   },
 ]
 
-// step -1 = welcome screen, 0..4 = survey questions
-export default function OnboardingSurvey({ onComplete }) {
+// step = -1 → welcome, 0 → canvas connect, 1-5 → survey questions
+export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
   const [step, setStep] = useState(-1)
   const [answers, setAnswers] = useState({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  // Welcome screen
+  // Canvas connect state
+  const [canvasToken, setCanvasToken] = useState('')
+  const [canvasLoading, setCanvasLoading] = useState(false)
+  const [canvasError, setCanvasError] = useState(null)
+  const [canvasConnected, setCanvasConnected] = useState(!!isCanvasConnected)
+  const [canvasUser, setCanvasUser] = useState(null)
+
+  // ── Welcome ──────────────────────────────────────────────────────────
   if (step === -1) {
     return (
       <div className="survey-backdrop">
         <div className="survey-card survey-welcome-card">
-          <div className="survey-welcome-logo">C</div>
+          <div className="survey-welcome-logo">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="28" height="28">
+              <rect x="3" y="4" width="18" height="18" rx="2"/>
+              <line x1="3" y1="9" x2="21" y2="9"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <path d="M12 13l-1 3h2l-1 3"/>
+            </svg>
+          </div>
           <h1 className="survey-welcome-title">Welcome to CampusAI</h1>
           <p className="survey-welcome-sub">
-            CampusAI pulls your Canvas assignments and builds you a personalized study schedule — so you&apos;re never caught off guard by a deadline.
+            Your AI-powered assignment dashboard. Connect Canvas, get smart scheduling suggestions, and stay ahead of every deadline.
           </p>
+          <ul className="survey-feature-list">
+            <li>
+              <span className="feature-icon">📋</span>
+              <span>Syncs all your Canvas assignments automatically</span>
+            </li>
+            <li>
+              <span className="feature-icon">🧠</span>
+              <span>AI recommends when to start based on your schedule</span>
+            </li>
+            <li>
+              <span className="feature-icon">📅</span>
+              <span>Export study blocks to Google Calendar or Apple Calendar</span>
+            </li>
+            <li>
+              <span className="feature-icon">🔔</span>
+              <span>Deadline reminders before anything slips through</span>
+            </li>
+          </ul>
           <button className="survey-next survey-welcome-btn" onClick={() => setStep(0)}>
             Get started
-          </button>
-          <button className="survey-skip" onClick={() => onComplete(null)}>
-            Skip for now
           </button>
         </div>
       </div>
     )
   }
 
-  const current = STEPS[step]
-  const selected = answers[current.id]
-  const isLast = step === STEPS.length - 1
+  // ── Canvas Connect ───────────────────────────────────────────────────
+  if (step === 0) {
+    const handleConnect = async () => {
+      const token = canvasToken.trim()
+      if (!token) return
+      setCanvasLoading(true)
+      setCanvasError(null)
+      try {
+        const res = await authFetch(`${API_BASE}/auth/canvas-token`, {
+          method: 'POST',
+          body: JSON.stringify({ token }),
+        })
+        if (!res.ok) {
+          const data = await res.json()
+          throw new Error(data.detail || 'Invalid token — check and try again.')
+        }
+        const data = await res.json()
+        setCanvasConnected(true)
+        setCanvasUser(data.user_name)
+        setCanvasToken('')
+      } catch (err) {
+        setCanvasError(err.message || 'Failed to connect. Please try again.')
+      } finally {
+        setCanvasLoading(false)
+      }
+    }
 
-  const choose = (value) => {
-    setAnswers((prev) => ({ ...prev, [current.id]: value }))
+    return (
+      <div className="survey-backdrop">
+        <div className="survey-card survey-canvas-card">
+          <div className="survey-canvas-header">
+            <div className="survey-step-badge">Step 1 of 2</div>
+            <h2 className="survey-canvas-title">Connect Canvas</h2>
+            <p className="survey-canvas-sub">
+              CampusAI needs a read-only API token to pull your assignments. It can&apos;t submit or change anything.
+            </p>
+          </div>
+
+          <div className="survey-canvas-body">
+            {canvasConnected ? (
+              <div className="survey-canvas-success">
+                <div className="canvas-success-icon">✓</div>
+                <div>
+                  <div className="canvas-success-name">{canvasUser || 'Canvas connected'}</div>
+                  <div className="canvas-success-sub">Your courses are ready to sync</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="survey-instructions">
+                  <p className="survey-instructions-title">How to get your token:</p>
+                  <ol className="survey-instructions-list">
+                    <li>Go to <strong>Canvas</strong> → click your <strong>Account</strong> (top-left avatar)</li>
+                    <li>Click <strong>Settings</strong></li>
+                    <li>Scroll to <strong>&quot;Approved Integrations&quot;</strong></li>
+                    <li>Click <strong>&quot;+ New Access Token&quot;</strong></li>
+                    <li>Name it <em>CampusAI</em>, leave expiry blank, click <strong>Generate</strong></li>
+                    <li>Copy the token and paste it below</li>
+                  </ol>
+                  <a
+                    className="survey-canvas-link"
+                    href="https://byu.instructure.com/profile/settings"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open Canvas Settings →
+                  </a>
+                </div>
+
+                <div className="survey-token-row">
+                  <input
+                    type="password"
+                    className="survey-token-input"
+                    placeholder="Paste your Canvas API token here"
+                    value={canvasToken}
+                    onChange={(e) => setCanvasToken(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+                    disabled={canvasLoading}
+                    autoFocus
+                  />
+                  <button
+                    className="survey-token-btn"
+                    onClick={handleConnect}
+                    disabled={canvasLoading || !canvasToken.trim()}
+                  >
+                    {canvasLoading ? 'Checking…' : 'Connect'}
+                  </button>
+                </div>
+
+                {canvasError && <p className="survey-error">{canvasError}</p>}
+
+                <p className="survey-security-note">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  </svg>
+                  Token is encrypted and only used to read assignment data — never shared.
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="survey-footer">
+            <button className="survey-back" onClick={() => setStep(-1)}>Back</button>
+            {!canvasConnected && (
+              <button className="survey-skip" onClick={() => setStep(1)}>
+                Skip for now
+              </button>
+            )}
+            <button
+              className="survey-next"
+              onClick={() => setStep(1)}
+              disabled={!canvasConnected && canvasToken.trim().length > 0 && canvasLoading}
+              style={{ marginLeft: canvasConnected ? 'auto' : undefined }}
+            >
+              {canvasConnected ? 'Continue' : 'Skip'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
+
+  // ── Survey questions (steps 1–5) ─────────────────────────────────────
+  const surveyIndex = step - 1  // 0-based index into SURVEY_STEPS
+  const current = SURVEY_STEPS[surveyIndex]
+  const selected = answers[current.id]
+  const isLast = surveyIndex === SURVEY_STEPS.length - 1
+
+  const choose = (value) => setAnswers((prev) => ({ ...prev, [current.id]: value }))
 
   const next = async () => {
     if (selected === undefined) return
@@ -103,28 +255,24 @@ export default function OnboardingSurvey({ onComplete }) {
       })
       if (!res.ok) throw new Error('Failed to save')
       const prefs = await res.json()
-      onComplete(prefs)
+      onComplete(prefs, canvasConnected)
     } catch {
       setError('Something went wrong. Please try again.')
       setSaving(false)
     }
   }
 
-  const skip = () => onComplete(null)
-
   return (
     <div className="survey-backdrop">
       <div className="survey-card">
         <div className="survey-header">
           <div className="survey-logo">CampusAI</div>
-          <p className="survey-intro">
-            Answer 5 quick questions so the AI can personalize your schedule.
-          </p>
+          <div className="survey-step-badge" style={{ marginBottom: '0.5rem' }}>Step 2 of 2 — Personalize</div>
           <div className="survey-progress">
-            {STEPS.map((_, i) => (
+            {SURVEY_STEPS.map((_, i) => (
               <div
                 key={i}
-                className={`survey-dot ${i < step ? 'done' : i === step ? 'active' : ''}`}
+                className={`survey-dot ${i < surveyIndex ? 'done' : i === surveyIndex ? 'active' : ''}`}
               />
             ))}
           </div>
@@ -132,7 +280,6 @@ export default function OnboardingSurvey({ onComplete }) {
 
         <div className="survey-body">
           <h2 className="survey-question">{current.question}</h2>
-
           <div className={`survey-options cols-${current.options.length}`}>
             {current.options.map((opt) => (
               <button
@@ -145,15 +292,12 @@ export default function OnboardingSurvey({ onComplete }) {
               </button>
             ))}
           </div>
-
           {error && <p className="survey-error">{error}</p>}
         </div>
 
         <div className="survey-footer">
-          <button className="survey-back" onClick={() => step === 0 ? setStep(-1) : setStep((s) => s - 1)}>
-            Back
-          </button>
-          <button className="survey-skip" onClick={skip}>
+          <button className="survey-back" onClick={() => setStep((s) => s - 1)}>Back</button>
+          <button className="survey-skip" onClick={() => onComplete(null, canvasConnected)}>
             Skip for now
           </button>
           <button
@@ -161,7 +305,7 @@ export default function OnboardingSurvey({ onComplete }) {
             onClick={next}
             disabled={selected === undefined || saving}
           >
-            {saving ? 'Saving…' : isLast ? 'Get started' : 'Next'}
+            {saving ? 'Saving…' : isLast ? 'Go to Dashboard' : 'Next'}
           </button>
         </div>
       </div>
