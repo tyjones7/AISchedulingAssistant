@@ -31,6 +31,15 @@ class AssignmentUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class AssignmentCreate(BaseModel):
+    title: str
+    course_name: str
+    due_date: str  # ISO datetime string
+    point_value: Optional[float] = None
+    assignment_type: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class SyncStartResponse(BaseModel):
     task_id: str
     message: str
@@ -283,6 +292,37 @@ def get_assignment_stats(user_id: str = Depends(get_current_user)):
     }
 
 
+@app.post("/assignments")
+def create_assignment(
+    data: AssignmentCreate,
+    user_id: str = Depends(get_current_user),
+):
+    """Manually create an assignment."""
+    insert_data = {
+        "user_id": user_id,
+        "title": data.title,
+        "course_name": data.course_name,
+        "due_date": data.due_date,
+        "status": "not_started",
+        "source": "manual",
+        "is_modified": True,
+        "last_scraped_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if data.point_value is not None:
+        insert_data["point_value"] = data.point_value
+    if data.assignment_type:
+        insert_data["assignment_type"] = data.assignment_type
+    if data.notes:
+        insert_data["notes"] = data.notes
+
+    response = supabase_service.table("assignments").insert(insert_data).execute()
+
+    if not response.data:
+        raise HTTPException(status_code=500, detail="Failed to create assignment")
+
+    return {"assignment": response.data[0]}
+
+
 @app.get("/assignments/{assignment_id}")
 def get_assignment(assignment_id: str, user_id: str = Depends(get_current_user)):
     """Get a single assignment by ID."""
@@ -306,6 +346,8 @@ def update_assignment(
 
     if update.status is not None:
         update_data["status"] = update.status
+        if update.status == "submitted":
+            update_data["submitted_at"] = datetime.now(timezone.utc).isoformat()
     if update.estimated_minutes is not None:
         update_data["estimated_minutes"] = update.estimated_minutes
     if update.planned_start is not None:

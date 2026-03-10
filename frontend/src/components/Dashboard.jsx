@@ -6,6 +6,8 @@ import AIBriefing from './AIBriefing'
 import AIChat from './AIChat'
 import ProactivePlan from './ProactivePlan'
 import Settings from './Settings'
+import StatsPanel from './StatsPanel'
+import AddAssignmentModal from './AddAssignmentModal'
 import { ToastContainer } from './Toast'
 import { authFetch, API_BASE } from '../lib/api'
 import './Dashboard.css'
@@ -64,6 +66,8 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
 
   // Settings panel
   const [showSettings, setShowSettings] = useState(false)
+  const [showStats, setShowStats] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
 
   // Trigger sync from SyncButton
   const [triggerSync, setTriggerSync] = useState(false)
@@ -471,6 +475,25 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     )
   }
 
+  const statsButton = (
+    <button className="logout-btn" onClick={() => setShowStats(true)} title="Insights" aria-label="Insights">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+      </svg>
+    </button>
+  )
+
+  const addButton = (
+    <button className="logout-btn" onClick={() => setShowAddModal(true)} title="Add assignment" aria-label="Add assignment">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    </button>
+  )
+
   const settingsButton = (
     <button className="logout-btn" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -491,6 +514,8 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               <span className="brand-name">CampusAI</span>
             </div>
             <div className="dash-header-actions">
+              {statsButton}
+              {addButton}
               {settingsButton}
             </div>
           </div>
@@ -526,6 +551,8 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               <span className="brand-name">CampusAI</span>
             </div>
             <div className="dash-header-actions">
+              {statsButton}
+              {addButton}
               {settingsButton}
             </div>
           </div>
@@ -739,6 +766,20 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
           preferences={preferences}
           onPreferencesChange={onPreferencesChange}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {/* Stats / Insights Panel */}
+      {showStats && (
+        <StatsPanel onClose={() => setShowStats(false)} />
+      )}
+
+      {/* Add Assignment Modal */}
+      {showAddModal && (
+        <AddAssignmentModal
+          onClose={() => setShowAddModal(false)}
+          onAdded={() => { setShowAddModal(false); fetchAssignments() }}
+          existingCourses={[...new Set(assignments.map(a => a.course_name).filter(Boolean))]}
         />
       )}
     </div>
