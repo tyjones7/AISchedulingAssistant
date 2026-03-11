@@ -98,9 +98,12 @@ function App() {
         setPreferences(prefs)
       }
 
-      // Show onboarding if canvas not connected OR no preferences saved yet
+      // Show onboarding only if preferences haven't been saved yet.
+      // Prefs are written at the end of onboarding — their existence is the
+      // reliable "setup completed" signal. Canvas connection is optional
+      // (LS-only students have no Canvas token and must not be looped back).
       const hasPrefs = !!(prefs?.id)
-      if (!connected || !hasPrefs) {
+      if (!hasPrefs) {
         setShowOnboarding(true)
       } else {
         // Returning user — re-register push if already granted
@@ -126,17 +129,26 @@ function App() {
     // onAuthStateChange fires and calls initUserState
   }
 
-  // Called when onboarding wizard completes
-  // prefs = saved preferences or null if skipped, connected = whether canvas was connected
-  const handleOnboardingComplete = async (prefs, connected) => {
+  // Called when onboarding wizard completes.
+  // prefs     = saved preferences or null if skipped
+  // connected = whether Canvas was connected during onboarding
+  // lsFeedsAdded = whether at least one LS iCal feed was saved during onboarding
+  const handleOnboardingComplete = async (prefs, connected, lsFeedsAdded = false) => {
     setShowOnboarding(false)
     if (prefs) {
       setPreferences(prefs)
       maybeRegisterPush(prefs)
     }
-    if (connected) {
-      setIsCanvasConnected(true)
-      // Auto-sync after connecting Canvas for the first time
+    if (connected) setIsCanvasConnected(true)
+
+    // Trigger sync if any data source was connected
+    if (connected || lsFeedsAdded) {
+      // Fire LS iCal sync immediately (fire-and-forget)
+      if (lsFeedsAdded) {
+        authFetch(`${API_BASE}/ls-feeds/sync`, { method: 'POST' }).catch(() => {})
+      }
+      // Trigger Canvas sync via the existing autoSync → SyncButton path,
+      // but only if we haven't synced recently
       try {
         const res = await authFetch(`${API_BASE}/sync/last`)
         if (res.ok) {
@@ -148,7 +160,7 @@ function App() {
           }
         }
       } catch { /* proceed with sync */ }
-      setShouldSync(true)
+      if (connected) setShouldSync(true)
     }
   }
 

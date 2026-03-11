@@ -42,6 +42,25 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [prefSaved, setPrefSaved] = useState(false)
   const [prefError, setPrefError] = useState(null)
 
+  // iCal feeds
+  const [icalFeeds, setIcalFeeds] = useState([])
+  const [icalUrl, setIcalUrl] = useState('')
+  const [icalCourse, setIcalCourse] = useState('')
+  const [icalAdding, setIcalAdding] = useState(false)
+  const [icalError, setIcalError] = useState(null)
+  const [icalPreviewing, setIcalPreviewing] = useState(false)
+  const [icalPreview, setIcalPreview] = useState(null)
+  const [icalSyncing, setIcalSyncing] = useState(false)
+  const [icalSyncResult, setIcalSyncResult] = useState(null)
+  const [showIcalAdd, setShowIcalAdd] = useState(false)
+
+  // iCal inline edit
+  const [editingFeedId, setEditingFeedId] = useState(null)
+  const [editCourse, setEditCourse] = useState('')
+  const [editUrl, setEditUrl] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState(null)
+
   // Push notifications
   const [pushSupported] = useState(() => isPushSupported())
   const [pushPermission, setPushPermission] = useState(() => getPushPermission())
@@ -80,6 +99,124 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.involvement_level) setInvolvementLevel(preferences.involvement_level)
     if (preferences.weekly_schedule !== undefined) setSchedule(preferences.weekly_schedule || [])
   }, [preferences])
+
+  // Load iCal feeds on mount
+  useEffect(() => {
+    authFetch(`${API_BASE}/ls-feeds`).then(async (res) => {
+      if (!res.ok) return
+      const data = await res.json()
+      setIcalFeeds(data.feeds || [])
+    }).catch(() => {})
+  }, [])
+
+  const handleIcalPreview = async () => {
+    const url = icalUrl.trim()
+    const course = icalCourse.trim()
+    if (!url || !course) return
+    setIcalPreviewing(true)
+    setIcalError(null)
+    setIcalPreview(null)
+    try {
+      const res = await authFetch(`${API_BASE}/ls-feeds/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ url, course_name: course }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Preview failed')
+      setIcalPreview(data)
+    } catch (err) {
+      setIcalError(err.message || 'Could not preview feed')
+    } finally {
+      setIcalPreviewing(false)
+    }
+  }
+
+  const handleIcalSave = async () => {
+    const url = icalUrl.trim()
+    const course = icalCourse.trim()
+    if (!url || !course) return
+    setIcalAdding(true)
+    setIcalError(null)
+    try {
+      const res = await authFetch(`${API_BASE}/ls-feeds`, {
+        method: 'POST',
+        body: JSON.stringify({ url, course_name: course }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Save failed')
+      setIcalFeeds(prev => [...prev, data.feed])
+      setIcalUrl('')
+      setIcalCourse('')
+      setIcalPreview(null)
+      setShowIcalAdd(false)
+    } catch (err) {
+      setIcalError(err.message || 'Could not save feed')
+    } finally {
+      setIcalAdding(false)
+    }
+  }
+
+  const handleIcalDelete = async (feedId) => {
+    try {
+      await authFetch(`${API_BASE}/ls-feeds/${feedId}`, { method: 'DELETE' })
+      setIcalFeeds(prev => prev.filter(f => f.id !== feedId))
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleIcalSync = async () => {
+    setIcalSyncing(true)
+    setIcalSyncResult(null)
+    try {
+      const res = await authFetch(`${API_BASE}/ls-feeds/sync`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Sync failed')
+      const added = data.results.reduce((s, r) => s + (r.new || 0), 0)
+      const updated = data.results.reduce((s, r) => s + (r.modified || 0), 0)
+      setIcalSyncResult(`Synced ${data.synced} course(s): ${added} new, ${updated} updated`)
+      setTimeout(() => setIcalSyncResult(null), 4000)
+    } catch (err) {
+      setIcalError(err.message || 'Sync failed')
+    } finally {
+      setIcalSyncing(false)
+    }
+  }
+
+  const handleIcalEditStart = (feed) => {
+    setEditingFeedId(feed.id)
+    setEditCourse(feed.course_name || '')
+    setEditUrl(feed.url || '')
+    setEditError(null)
+  }
+
+  const handleIcalEditCancel = () => {
+    setEditingFeedId(null)
+    setEditCourse('')
+    setEditUrl('')
+    setEditError(null)
+  }
+
+  const handleIcalEditSave = async (feedId) => {
+    setEditSaving(true)
+    setEditError(null)
+    try {
+      const res = await authFetch(`${API_BASE}/ls-feeds/${feedId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ url: editUrl.trim(), course_name: editCourse.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Save failed')
+      setIcalFeeds(prev => prev.map(f => f.id === feedId ? data.feed : f))
+      setEditingFeedId(null)
+      setEditCourse('')
+      setEditUrl('')
+    } catch (err) {
+      setEditError(err.message || 'Could not save changes')
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   const handleCanvasConnect = async () => {
     const token = canvasToken.trim()
@@ -233,6 +370,143 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                 Canvas Settings
               </a>
               {' '}under &quot;Approved Integrations.&quot;
+            </p>
+          </section>
+
+          {/* Learning Suite iCal Section */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">Learning Suite (iCal)</h3>
+            <p className="settings-section-desc">
+              Add per-course iCal feed URLs from Learning Suite to sync assignments without logging in.
+            </p>
+
+            {icalFeeds.length > 0 && (
+              <div className="ical-feeds-list">
+                {icalFeeds.map(feed => (
+                  <div key={feed.id} className="ical-feed-row">
+                    {editingFeedId === feed.id ? (
+                      <div className="ical-edit-form">
+                        <input
+                          type="text"
+                          className="settings-token-input"
+                          placeholder="Course name"
+                          value={editCourse}
+                          onChange={(e) => setEditCourse(e.target.value)}
+                          autoFocus
+                        />
+                        <input
+                          type="url"
+                          className="settings-token-input"
+                          placeholder="iCal feed URL"
+                          value={editUrl}
+                          onChange={(e) => setEditUrl(e.target.value)}
+                        />
+                        {editError && <p className="settings-error">{editError}</p>}
+                        <div className="schedule-add-actions">
+                          <button className="settings-secondary-btn" onClick={handleIcalEditCancel}>Cancel</button>
+                          <button
+                            className="settings-primary-btn"
+                            onClick={() => handleIcalEditSave(feed.id)}
+                            disabled={editSaving || !editCourse.trim() || !editUrl.trim()}
+                          >{editSaving ? 'Saving...' : 'Save'}</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="ical-feed-info">
+                          <span className="ical-feed-course">{feed.course_name}</span>
+                          {feed.last_synced_at && (
+                            <span className="ical-feed-synced">
+                              Last synced {new Date(feed.last_synced_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="ical-feed-actions">
+                          <button
+                            className="schedule-block-edit"
+                            onClick={() => handleIcalEditStart(feed)}
+                            aria-label="Edit feed"
+                          >Edit</button>
+                          <button
+                            className="schedule-block-remove"
+                            onClick={() => handleIcalDelete(feed.id)}
+                            aria-label="Remove feed"
+                          >×</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {showIcalAdd ? (
+              <div className="ical-add-form">
+                <input
+                  type="text"
+                  className="settings-token-input"
+                  placeholder="Course name (e.g. STRAT 490R)"
+                  value={icalCourse}
+                  onChange={(e) => setIcalCourse(e.target.value)}
+                />
+                <input
+                  type="url"
+                  className="settings-token-input"
+                  placeholder="iCal feed URL (https://learningsuite.byu.edu/iCalFeed/...)"
+                  value={icalUrl}
+                  onChange={(e) => { setIcalUrl(e.target.value); setIcalPreview(null) }}
+                />
+                {icalPreview && (
+                  <div className="ical-preview">
+                    <span className="ical-preview-count">{icalPreview.total} events found</span>
+                    {icalPreview.preview.map((item, i) => (
+                      <div key={i} className="ical-preview-item">
+                        <span className="ical-preview-date">{item.due_date?.slice(0, 10)}</span>
+                        <span className="ical-preview-title">{item.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {icalError && <p className="settings-error">{icalError}</p>}
+                <div className="schedule-add-actions">
+                  <button
+                    type="button"
+                    className="settings-secondary-btn"
+                    onClick={() => { setShowIcalAdd(false); setIcalUrl(''); setIcalCourse(''); setIcalPreview(null); setIcalError(null) }}
+                  >Cancel</button>
+                  <button
+                    type="button"
+                    className="settings-secondary-btn"
+                    onClick={handleIcalPreview}
+                    disabled={icalPreviewing || !icalUrl.trim() || !icalCourse.trim()}
+                  >{icalPreviewing ? 'Checking...' : 'Preview'}</button>
+                  <button
+                    type="button"
+                    className="settings-primary-btn"
+                    onClick={handleIcalSave}
+                    disabled={icalAdding || !icalUrl.trim() || !icalCourse.trim()}
+                  >{icalAdding ? 'Saving...' : 'Save'}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="ical-actions">
+                <button className="settings-secondary-btn" onClick={() => { setShowIcalAdd(true); setIcalError(null) }}>
+                  + Add iCal feed
+                </button>
+                {icalFeeds.length > 0 && (
+                  <button
+                    className="settings-action-btn"
+                    onClick={handleIcalSync}
+                    disabled={icalSyncing}
+                  >{icalSyncing ? 'Syncing...' : 'Sync Now'}</button>
+                )}
+              </div>
+            )}
+
+            {icalSyncResult && <p className="settings-hint" style={{ color: '#1a7a35', marginTop: '8px' }}>{icalSyncResult}</p>}
+
+            <p className="settings-hint">
+              Find your iCal URL in Learning Suite under <strong>Course Settings → iCal Feed</strong>.
             </p>
           </section>
 

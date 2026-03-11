@@ -2,6 +2,14 @@ import { useState } from 'react'
 import { authFetch, API_BASE } from '../lib/api'
 import './OnboardingSurvey.css'
 
+// ── Step numbering ────────────────────────────────────────────────────────────
+//  -1  Welcome
+//   0  Where are your classes? (classSource)
+//   1  Canvas token connect     (skipped when classSource === 'ls')
+//   2  Learning Suite iCal      (skipped when classSource === 'canvas')
+//  3–7  Survey questions (5 questions, same as before)
+// ─────────────────────────────────────────────────────────────────────────────
+
 const SURVEY_STEPS = [
   {
     id: 'study_time',
@@ -52,9 +60,48 @@ const SURVEY_STEPS = [
   },
 ]
 
-// step = -1 → welcome, 0 → canvas connect, 1-5 → survey questions
+const CLASS_SOURCE_OPTIONS = [
+  { value: 'canvas',   label: 'Canvas only',      sub: 'byu.instructure.com' },
+  { value: 'ls',       label: 'Learning Suite',   sub: 'learningsuite.byu.edu' },
+  { value: 'both',     label: 'Both',             sub: 'Canvas + Learning Suite' },
+  { value: 'not_sure', label: 'Not sure',         sub: "I'll set up both options" },
+]
+
+// ── Navigation helpers ────────────────────────────────────────────────────────
+
+function getNextStep(current, classSource) {
+  if (current === -1) return 0
+  if (current === 0) {
+    if (classSource === 'ls') return 2   // skip Canvas
+    return 1                              // canvas / both / not_sure → Canvas first
+  }
+  if (current === 1) {
+    if (classSource === 'canvas') return 3  // skip LS
+    return 2                                 // both / not_sure → LS step
+  }
+  if (current === 2) return 3
+  return current + 1  // survey steps 3–7
+}
+
+function getPrevStep(current, classSource) {
+  if (current === 0) return -1
+  if (current === 1) return 0
+  if (current === 2) {
+    if (classSource === 'ls') return 0
+    return 1  // both / not_sure came from Canvas step
+  }
+  if (current === 3) {
+    if (classSource === 'canvas') return 1
+    return 2  // ls / both / not_sure came from LS step
+  }
+  return current - 1
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
   const [step, setStep] = useState(-1)
+  const [classSource, setClassSource] = useState(null)
   const [answers, setAnswers] = useState({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -66,7 +113,20 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
   const [canvasConnected, setCanvasConnected] = useState(!!isCanvasConnected)
   const [canvasUser, setCanvasUser] = useState(null)
 
-  // ── Welcome ──────────────────────────────────────────────────────────
+  // LS iCal state
+  const [lsFeeds, setLsFeeds] = useState([])   // feeds saved to backend during onboarding
+  const [lsUrl, setLsUrl] = useState('')
+  const [lsCourse, setLsCourse] = useState('')
+  const [lsAdding, setLsAdding] = useState(false)
+  const [lsPreviewing, setLsPreviewing] = useState(false)
+  const [lsPreview, setLsPreview] = useState(null)
+  const [lsError, setLsError] = useState(null)
+
+  const goNext = () => setStep(s => getNextStep(s, classSource))
+  const goBack = () => setStep(s => getPrevStep(s, classSource))
+
+  // ── Step -1: Welcome ──────────────────────────────────────────────────────
+
   if (step === -1) {
     return (
       <div className="survey-backdrop">
@@ -82,12 +142,12 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
           </div>
           <h1 className="survey-welcome-title">Welcome to CampusAI</h1>
           <p className="survey-welcome-sub">
-            Your AI-powered assignment dashboard. Connect Canvas, get smart scheduling suggestions, and stay ahead of every deadline.
+            Your AI-powered assignment dashboard. Syncs from Canvas and Learning Suite, gives smart scheduling suggestions, and keeps you ahead of every deadline.
           </p>
           <ul className="survey-feature-list">
             <li>
               <span className="feature-icon">📋</span>
-              <span>Syncs all your Canvas assignments automatically</span>
+              <span>Pulls assignments from Canvas and Learning Suite automatically</span>
             </li>
             <li>
               <span className="feature-icon">🧠</span>
@@ -110,8 +170,52 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
     )
   }
 
-  // ── Canvas Connect ───────────────────────────────────────────────────
+  // ── Step 0: Class source ──────────────────────────────────────────────────
+
   if (step === 0) {
+    return (
+      <div className="survey-backdrop">
+        <div className="survey-card">
+          <div className="survey-header">
+            <div className="survey-logo">CampusAI</div>
+            <div className="survey-step-badge">Setup</div>
+          </div>
+
+          <div className="survey-body">
+            <h2 className="survey-question">Where are your BYU classes?</h2>
+            <div className="survey-options cols-2">
+              {CLASS_SOURCE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={`survey-option ${classSource === opt.value ? 'selected' : ''}`}
+                  onClick={() => setClassSource(opt.value)}
+                >
+                  <span className="survey-opt-label">{opt.label}</span>
+                  <span className="survey-opt-sub">{opt.sub}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="survey-footer">
+            <button className="survey-back" onClick={goBack}>Back</button>
+            <button
+              className="survey-next"
+              style={{ marginLeft: 'auto' }}
+              onClick={goNext}
+              disabled={!classSource}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Step 1: Canvas connect ────────────────────────────────────────────────
+
+  if (step === 1) {
     const handleConnect = async () => {
       const token = canvasToken.trim()
       if (!token) return
@@ -141,7 +245,7 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
       <div className="survey-backdrop">
         <div className="survey-card survey-canvas-card">
           <div className="survey-canvas-header">
-            <div className="survey-step-badge">Step 1 of 2</div>
+            <div className="survey-step-badge">Connect Canvas</div>
             <h2 className="survey-canvas-title">Connect Canvas</h2>
             <p className="survey-canvas-sub">
               CampusAI needs a read-only API token to pull your assignments. It can&apos;t submit or change anything.
@@ -212,15 +316,15 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
           </div>
 
           <div className="survey-footer">
-            <button className="survey-back" onClick={() => setStep(-1)}>Back</button>
+            <button className="survey-back" onClick={goBack}>Back</button>
             {!canvasConnected && (
-              <button className="survey-skip" onClick={() => setStep(1)}>
+              <button className="survey-skip" onClick={goNext}>
                 Skip for now
               </button>
             )}
             <button
               className="survey-next"
-              onClick={() => setStep(1)}
+              onClick={goNext}
               disabled={!canvasConnected && canvasToken.trim().length > 0 && canvasLoading}
               style={{ marginLeft: canvasConnected ? 'auto' : undefined }}
             >
@@ -232,8 +336,180 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
     )
   }
 
-  // ── Survey questions (steps 1–5) ─────────────────────────────────────
-  const surveyIndex = step - 1  // 0-based index into SURVEY_STEPS
+  // ── Step 2: Learning Suite iCal setup ─────────────────────────────────────
+
+  if (step === 2) {
+    const handlePreview = async () => {
+      const url = lsUrl.trim()
+      const course = lsCourse.trim()
+      if (!url || !course) return
+      setLsPreviewing(true)
+      setLsError(null)
+      setLsPreview(null)
+      try {
+        const res = await authFetch(`${API_BASE}/ls-feeds/preview`, {
+          method: 'POST',
+          body: JSON.stringify({ url, course_name: course }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.detail || 'Could not load feed')
+        setLsPreview(data)
+      } catch (err) {
+        setLsError(err.message || 'Could not preview this URL')
+      } finally {
+        setLsPreviewing(false)
+      }
+    }
+
+    const handleAddFeed = async () => {
+      const url = lsUrl.trim()
+      const course = lsCourse.trim()
+      if (!url || !course) return
+      setLsAdding(true)
+      setLsError(null)
+      try {
+        const res = await authFetch(`${API_BASE}/ls-feeds`, {
+          method: 'POST',
+          body: JSON.stringify({ url, course_name: course }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.detail || 'Could not save feed')
+        setLsFeeds(prev => [...prev, data.feed])
+        setLsUrl('')
+        setLsCourse('')
+        setLsPreview(null)
+      } catch (err) {
+        setLsError(err.message || 'Could not add course')
+      } finally {
+        setLsAdding(false)
+      }
+    }
+
+    const handleRemoveFeed = async (feedId) => {
+      try {
+        await authFetch(`${API_BASE}/ls-feeds/${feedId}`, { method: 'DELETE' })
+        setLsFeeds(prev => prev.filter(f => f.id !== feedId))
+      } catch { /* ignore */ }
+    }
+
+    return (
+      <div className="survey-backdrop">
+        <div className="survey-card survey-ls-card">
+          <div className="survey-canvas-header">
+            <div className="survey-step-badge">Add Learning Suite Courses</div>
+            <h2 className="survey-canvas-title">Add Learning Suite Courses</h2>
+            <p className="survey-canvas-sub">
+              Each LS course has an iCal feed URL — no login needed. Add each course below.
+            </p>
+          </div>
+
+          <div className="survey-ls-body">
+            {/* Added feeds list */}
+            {lsFeeds.length > 0 && (
+              <div className="survey-ls-feeds">
+                {lsFeeds.map((feed) => (
+                  <div key={feed.id} className="survey-ls-feed-row">
+                    <span className="survey-ls-feed-name">{feed.course_name}</span>
+                    <button
+                      className="survey-ls-feed-remove"
+                      onClick={() => handleRemoveFeed(feed.id)}
+                      aria-label={`Remove ${feed.course_name}`}
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Instructions */}
+            <div className="survey-instructions">
+              <p className="survey-instructions-title">How to find your iCal URL:</p>
+              <ol className="survey-instructions-list">
+                <li>Open <strong>Learning Suite</strong> and go to a course</li>
+                <li>Click <strong>Course Settings</strong> (gear icon in the sidebar)</li>
+                <li>Find the <strong>iCal Feed</strong> section</li>
+                <li>Copy the iCal URL and paste it below</li>
+              </ol>
+              <a
+                className="survey-canvas-link"
+                href="https://learningsuite.byu.edu"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open Learning Suite →
+              </a>
+            </div>
+
+            {/* Add course form */}
+            <div className="survey-ls-form">
+              <input
+                type="text"
+                className="survey-token-input"
+                placeholder="Course name (e.g. STRAT 490R)"
+                value={lsCourse}
+                onChange={(e) => setLsCourse(e.target.value)}
+              />
+              <div className="survey-ls-input-row">
+                <input
+                  type="url"
+                  className="survey-token-input"
+                  placeholder="iCal feed URL"
+                  value={lsUrl}
+                  onChange={(e) => { setLsUrl(e.target.value); setLsPreview(null) }}
+                />
+                <button
+                  className="survey-token-btn"
+                  onClick={handlePreview}
+                  disabled={lsPreviewing || !lsUrl.trim() || !lsCourse.trim()}
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  {lsPreviewing ? 'Checking…' : 'Preview'}
+                </button>
+              </div>
+
+              {lsPreview && (
+                <div className="survey-ls-preview">
+                  <span className="survey-ls-preview-count">{lsPreview.total} assignments found</span>
+                  {lsPreview.preview.map((item, i) => (
+                    <div key={i} className="survey-ls-preview-item">
+                      <span className="survey-ls-preview-date">{item.due_date?.slice(0, 10)}</span>
+                      <span className="survey-ls-preview-title">{item.title}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {lsError && <p className="survey-error" style={{ textAlign: 'left' }}>{lsError}</p>}
+
+              <button
+                className="survey-next"
+                style={{ alignSelf: 'flex-start' }}
+                onClick={handleAddFeed}
+                disabled={lsAdding || !lsUrl.trim() || !lsCourse.trim()}
+              >
+                {lsAdding ? 'Adding…' : '+ Add Course'}
+              </button>
+            </div>
+          </div>
+
+          <div className="survey-footer">
+            <button className="survey-back" onClick={goBack}>Back</button>
+            <button className="survey-skip" onClick={goNext}>
+              {lsFeeds.length > 0 ? 'Done adding' : 'Skip for now'}
+            </button>
+            {lsFeeds.length > 0 && (
+              <button className="survey-next" onClick={goNext}>
+                Continue
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Steps 3–7: Survey questions ───────────────────────────────────────────
+
+  const surveyIndex = step - 3
   const current = SURVEY_STEPS[surveyIndex]
   const selected = answers[current.id]
   const isLast = surveyIndex === SURVEY_STEPS.length - 1
@@ -255,7 +531,7 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
       })
       if (!res.ok) throw new Error('Failed to save')
       const prefs = await res.json()
-      onComplete(prefs, canvasConnected)
+      onComplete(prefs, canvasConnected, lsFeeds.length > 0)
     } catch {
       setError('Something went wrong. Please try again.')
       setSaving(false)
@@ -267,7 +543,7 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
       <div className="survey-card">
         <div className="survey-header">
           <div className="survey-logo">CampusAI</div>
-          <div className="survey-step-badge" style={{ marginBottom: '0.5rem' }}>Step 2 of 2 — Personalize</div>
+          <div className="survey-step-badge" style={{ marginBottom: '0.5rem' }}>Personalize</div>
           <div className="survey-progress">
             {SURVEY_STEPS.map((_, i) => (
               <div
@@ -296,8 +572,8 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
         </div>
 
         <div className="survey-footer">
-          <button className="survey-back" onClick={() => setStep((s) => s - 1)}>Back</button>
-          <button className="survey-skip" onClick={() => onComplete(null, canvasConnected)}>
+          <button className="survey-back" onClick={() => setStep((s) => getPrevStep(s, classSource))}>Back</button>
+          <button className="survey-skip" onClick={() => onComplete(null, canvasConnected, lsFeeds.length > 0)}>
             Skip for now
           </button>
           <button

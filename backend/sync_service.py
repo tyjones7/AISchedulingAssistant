@@ -192,10 +192,21 @@ class SyncService:
 
         canvas_token = canvas_auth_store.get_token(user_id)
 
-        if not canvas_token:
+        # Check whether there is anything to sync (Canvas token or iCal feeds)
+        has_ical_feeds = False
+        if self.supabase:
+            try:
+                feeds_resp = self.supabase.table("ls_ical_feeds").select("id").eq(
+                    "user_id", user_id
+                ).limit(1).execute()
+                has_ical_feeds = bool(feeds_resp.data)
+            except Exception:
+                pass
+
+        if not canvas_token and not has_ical_feeds:
             with self._task_lock:
                 task.status = SyncStatus.FAILED
-                task.error = "Canvas not connected. Please connect Canvas in Settings."
+                task.error = "Nothing to sync. Connect Canvas or add an iCal feed in Settings."
                 task.message = f"Sync failed: {task.error}"
                 task.completed_at = datetime.now(timezone.utc)
             self._save_sync_metadata(task_id, user_id, "failed", None, task.error)
@@ -237,6 +248,44 @@ class SyncService:
                 except Exception as e:
                     logger.error(f"Sync [{task_id[:8]}] - Canvas sync error: {e}")
                     raise
+
+            # ---- iCal feed sync ----
+            if has_ical_feeds:
+                self._update_task(task_id, SyncStatus.SCRAPING, "Syncing Learning Suite iCal feeds...")
+                from ical_client import fetch_and_parse, update_database as ical_update_database
+
+                ical_feeds_resp = self.supabase.table("ls_ical_feeds").select("*").eq(
+                    "user_id", user_id
+                ).execute()
+                ical_feeds = ical_feeds_resp.data or []
+                now_iso = datetime.now(timezone.utc).isoformat()
+
+                for feed in ical_feeds:
+                    try:
+                        with self._task_lock:
+                            task.message = f"iCal: {feed['course_name']}..."
+
+                        ical_assignments = fetch_and_parse(feed["url"], feed["course_name"])
+                        ical_result = ical_update_database(
+                            ical_assignments,
+                            supabase_client=self.supabase,
+                            user_id=user_id,
+                        )
+
+                        with self._task_lock:
+                            task.assignments_added += ical_result.get("new", 0)
+                            task.assignments_updated += ical_result.get("modified", 0)
+                            task.courses_scraped += 1
+
+                        self.supabase.table("ls_ical_feeds").update(
+                            {"last_synced_at": now_iso}
+                        ).eq("id", feed["id"]).execute()
+
+                        logger.info(f"Sync [{task_id[:8]}] - iCal {feed['course_name']}: {ical_result}")
+                    except Exception as e:
+                        logger.error(f"Sync [{task_id[:8]}] - iCal feed {feed['id']} failed: {e}")
+                        with self._task_lock:
+                            task.warnings.append(f"iCal sync failed for {feed['course_name']}: {e}")
 
             # Build result summary for metadata
             result = {

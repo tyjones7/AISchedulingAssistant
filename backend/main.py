@@ -121,6 +121,16 @@ class PushSubscription(BaseModel):
     keys: dict  # {p256dh: str, auth: str}
 
 
+class LSICalFeedCreate(BaseModel):
+    url: str
+    course_name: str
+
+
+class LSICalFeedUpdate(BaseModel):
+    url: Optional[str] = None
+    course_name: Optional[str] = None
+
+
 class UserPreferences(BaseModel):
     id: Optional[str] = None
     study_time: Literal["morning", "afternoon", "evening", "night"] = "evening"
@@ -883,6 +893,111 @@ def ai_apply_plan(req: AIApplyPlanRequest, user_id: str = Depends(get_current_us
 
     logger.info(f"POST /ai/apply-plan user={user_id[:8]} - updated {len(updated)} assignment(s)")
     return {"updated": len(updated), "assignments": updated}
+
+
+# ============== LEARNING SUITE iCAL ROUTES ==============
+
+@app.get("/ls-feeds")
+def get_ls_feeds(user_id: str = Depends(get_current_user)):
+    """Return all saved iCal feed URLs for the user."""
+    result = supabase_service.table("ls_ical_feeds").select("*").eq(
+        "user_id", user_id
+    ).order("created_at").execute()
+    return {"feeds": result.data or []}
+
+
+@app.post("/ls-feeds", status_code=201)
+def add_ls_feed(body: LSICalFeedCreate, user_id: str = Depends(get_current_user)):
+    """Save a new iCal feed URL."""
+    url = body.url.strip()
+    course_name = body.course_name.strip()
+    if not url or not course_name:
+        raise HTTPException(status_code=400, detail="url and course_name are required")
+    result = supabase_service.table("ls_ical_feeds").insert({
+        "user_id": user_id,
+        "url": url,
+        "course_name": course_name,
+    }).execute()
+    return {"feed": result.data[0]}
+
+
+@app.post("/ls-feeds/preview")
+def preview_ls_feed(body: LSICalFeedCreate):
+    """Fetch and parse an iCal URL without saving or writing to DB. Returns first 5 events."""
+    from ical_client import fetch_and_parse
+    try:
+        assignments = fetch_and_parse(body.url.strip(), body.course_name.strip())
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not fetch iCal feed: {e}")
+    preview = [
+        {"title": a["title"], "due_date": a["due_date"], "assignment_type": a["assignment_type"]}
+        for a in assignments[:5]
+    ]
+    return {"total": len(assignments), "preview": preview}
+
+
+@app.post("/ls-feeds/sync")
+def sync_ls_feeds(user_id: str = Depends(get_current_user)):
+    """Sync all saved iCal feeds for the user. Returns per-feed results."""
+    from ical_client import fetch_and_parse, update_database
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    feeds_resp = supabase_service.table("ls_ical_feeds").select("*").eq(
+        "user_id", user_id
+    ).execute()
+    feeds = feeds_resp.data or []
+
+    if not feeds:
+        return {"synced": 0, "results": []}
+
+    results = []
+    for feed in feeds:
+        try:
+            assignments = fetch_and_parse(feed["url"], feed["course_name"])
+            counts = update_database(assignments, supabase_client=supabase_service, user_id=user_id)
+            supabase_service.table("ls_ical_feeds").update(
+                {"last_synced_at": now_iso}
+            ).eq("id", feed["id"]).execute()
+            results.append({"feed_id": feed["id"], "course_name": feed["course_name"], **counts, "error": None})
+        except Exception as e:
+            logger.error(f"POST /ls-feeds/sync - feed {feed['id']} failed: {e}")
+            results.append({"feed_id": feed["id"], "course_name": feed["course_name"], "error": str(e)})
+
+    return {"synced": len(feeds), "results": results}
+
+
+@app.patch("/ls-feeds/{feed_id}")
+def update_ls_feed(feed_id: str, body: LSICalFeedUpdate, user_id: str = Depends(get_current_user)):
+    """Update url and/or course_name of a saved iCal feed."""
+    updates = {}
+    if body.url is not None:
+        url = body.url.strip()
+        if not url:
+            raise HTTPException(status_code=400, detail="url cannot be empty")
+        updates["url"] = url
+    if body.course_name is not None:
+        course_name = body.course_name.strip()
+        if not course_name:
+            raise HTTPException(status_code=400, detail="course_name cannot be empty")
+        updates["course_name"] = course_name
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = supabase_service.table("ls_ical_feeds").update(updates).eq(
+        "id", feed_id
+    ).eq("user_id", user_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Feed not found")
+    return {"feed": result.data[0]}
+
+
+@app.delete("/ls-feeds/{feed_id}", status_code=204)
+def delete_ls_feed(feed_id: str, user_id: str = Depends(get_current_user)):
+    """Delete a saved iCal feed by ID."""
+    result = supabase_service.table("ls_ical_feeds").delete().eq(
+        "id", feed_id
+    ).eq("user_id", user_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Feed not found")
 
 
 # ============== PUSH NOTIFICATION ROUTES ==============
