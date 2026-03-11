@@ -506,7 +506,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
             {icalSyncResult && <p className="settings-hint" style={{ color: '#1a7a35', marginTop: '8px' }}>{icalSyncResult}</p>}
 
             <p className="settings-hint">
-              Find your iCal URL in Learning Suite under <strong>Course Settings → iCal Feed</strong>.
+              In Learning Suite: open a course → <strong>Schedule</strong> → <strong>Get iCalendar Feed</strong> → copy the URL.
             </p>
           </section>
 

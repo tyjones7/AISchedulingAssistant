@@ -424,10 +424,11 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
             <div className="survey-instructions">
               <p className="survey-instructions-title">How to find your iCal URL:</p>
               <ol className="survey-instructions-list">
-                <li>Open <strong>Learning Suite</strong> and go to a course</li>
-                <li>Click <strong>Course Settings</strong> (gear icon in the sidebar)</li>
-                <li>Find the <strong>iCal Feed</strong> section</li>
-                <li>Copy the iCal URL and paste it below</li>
+                <li>Open <strong>Learning Suite</strong> and click into a course</li>
+                <li>Click <strong>Schedule</strong> in the left sidebar</li>
+                <li>Click <strong>&quot;Get iCalendar Feed&quot;</strong> at the top of the page</li>
+                <li>Click the <strong>copy button</strong> next to the URL</li>
+                <li>Paste it below — repeat for each course</li>
               </ol>
               <a
                 className="survey-canvas-link"
