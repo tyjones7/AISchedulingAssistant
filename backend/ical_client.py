@@ -12,6 +12,7 @@ import os
 import logging
 import re
 from datetime import datetime, timezone, date as _date
+from urllib.parse import urlparse, parse_qs
 from zoneinfo import ZoneInfo
 
 import requests
@@ -27,6 +28,27 @@ _EXAM_RE = re.compile(r'\b(exam|midterm|final|test)\b', re.IGNORECASE)
 _QUIZ_RE = re.compile(r'\bquiz\b', re.IGNORECASE)
 _READING_RE = re.compile(r'\b(reading|read|chapter)\b', re.IGNORECASE)
 _DISCUSSION_RE = re.compile(r'\b(discussion|discussion board|db)\b', re.IGNORECASE)
+
+# Patterns that identify non-assignment calendar events (class sessions, office hours, etc.)
+_NON_ASSIGNMENT_RE = re.compile(
+    r'^\*+\s*no\s+class|^\*+|'           # ***NO CLASS*** or any ***-prefixed marker
+    r'^session\s+\d+[:\s]|'               # Session 21: ... or Session 3 ...
+    r'\boffice\s+hours?\b|'               # Office Hours / Office Hour
+    r'\bta\s+hours?\b|'                   # TA Hours
+    r'\blab\s+section\b|'                 # Lab Section
+    r'^class\s+(meeting|session)\b',      # Class Meeting / Class Session
+    re.IGNORECASE,
+)
+
+
+def _extract_course_id(url: str) -> str | None:
+    """Extract courseID query param from an LS iCal feed URL."""
+    try:
+        qs = parse_qs(urlparse(url).query)
+        vals = qs.get("courseID") or qs.get("courseid") or qs.get("CourseID")
+        return vals[0] if vals else None
+    except Exception:
+        return None
 
 
 def _infer_assignment_type(title: str) -> str:
@@ -94,8 +116,14 @@ def fetch_and_parse(url: str, course_name: str) -> list[dict]:
         if not summary or dtstart_prop is None:
             continue
 
-        title = str(summary).strip()
+        # Normalize whitespace (LS occasionally wraps long titles)
+        title = re.sub(r'\s+', ' ', str(summary)).strip()
         if not title:
+            continue
+
+        # Skip non-assignment events (class sessions, office hours, TA hours, etc.)
+        if _NON_ASSIGNMENT_RE.search(title):
+            logger.debug(f"iCal: skipping non-assignment event: {title!r}")
             continue
 
         dtstart_val = dtstart_prop.dt if hasattr(dtstart_prop, 'dt') else dtstart_prop
@@ -128,7 +156,7 @@ def fetch_and_parse(url: str, course_name: str) -> list[dict]:
     return assignments
 
 
-def update_database(assignments: list[dict], supabase_client=None, user_id: str = None) -> dict:
+def update_database(assignments: list[dict], supabase_client=None, user_id: str = None, feed_url: str = None) -> dict:
     """Upsert iCal assignments into Supabase by ls_ical_uid.
 
     Rules mirror canvas_client.update_database():
@@ -226,6 +254,30 @@ def update_database(assignments: list[dict], supabase_client=None, user_id: str 
         except Exception as e:
             logger.error(f"iCal DB error for uid={ls_ical_uid}: {e}")
             counts["errors"] += 1
+
+    # ---- Stale cleanup ----
+    # Delete DB assignments for this feed whose UID is no longer in the current batch.
+    # We match by courseID embedded in the UID (format: {eventId}{courseID}@ctl.byu.edu).
+    if feed_url and user_id and uids:
+        course_id = _extract_course_id(feed_url)
+        if course_id:
+            try:
+                # Fetch all user assignments whose ls_ical_uid contains this courseID
+                all_resp = supabase.table("assignments").select(
+                    "id, ls_ical_uid"
+                ).eq("user_id", user_id).like("ls_ical_uid", f"%{course_id}%").execute()
+
+                current_uid_set = set(uids)
+                stale_ids = [
+                    row["id"] for row in (all_resp.data or [])
+                    if row.get("ls_ical_uid") and row["ls_ical_uid"] not in current_uid_set
+                ]
+                if stale_ids:
+                    supabase.table("assignments").delete().in_("id", stale_ids).execute()
+                    counts["deleted"] = len(stale_ids)
+                    logger.info(f"iCal: deleted {len(stale_ids)} stale assignments for courseID={course_id}")
+            except Exception as e:
+                logger.warning(f"iCal: stale cleanup failed for courseID={course_id}: {e}")
 
     logger.info(f"iCal DB update: {counts}")
     return counts

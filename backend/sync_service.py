@@ -270,6 +270,7 @@ class SyncService:
                             ical_assignments,
                             supabase_client=self.supabase,
                             user_id=user_id,
+                            feed_url=feed["url"],
                         )
 
                         with self._task_lock:

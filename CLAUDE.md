@@ -54,6 +54,7 @@ React Frontend (Dashboard) ← FastAPI Backend ←──────────
 - `scraper/canvas_client.py` - Canvas REST API client. Uses personal access token (Bearer auth). Key methods: `get_courses()`, `get_assignments(course_id, course_name)`, `scrape_all_courses()`, `update_database()`.
 - `sync_service.py` - Background sync orchestrator with thread-safe status tracking
 - `canvas_auth_store.py` - Canvas API token store (per-user, Supabase-backed)
+- `ical_client.py` - Learning Suite iCal feed client. `fetch_and_parse(url, course_name)` fetches and parses a feed, filtering non-assignment events (class sessions, office hours, TA hours). `update_database(assignments, supabase_client, user_id, feed_url)` upserts by `ls_ical_uid` and deletes stale entries for the feed's courseID.
 
 ### Frontend (`/frontend`)
 - `src/components/Dashboard.jsx` - Main dashboard. Two-column layout (timeline left, AI sidebar right, max-width 1400px). Accepts `preferences` and `onPreferencesChange` props. Contains `openChatRef` for programmatic chat opening. No involvement selector in header — that lives in Settings.
@@ -62,9 +63,9 @@ React Frontend (Dashboard) ← FastAPI Backend ←──────────
 - `src/components/AIChat.jsx` - Floating chat panel. Accepts `involvementLevel` and `openChatRef` props. Auto-loads daily briefing as first message on first open of the day (proactive/balanced only). Streaming SSE, persistent localStorage history, "Apply as my schedule" button.
 - `src/components/AIBriefing.jsx` - Daily AI briefing display panel on dashboard (right sidebar).
 - `src/components/ProactivePlan.jsx` - Proactive AI study plan card shown in right sidebar. Auto-generates suggestions for proactive users, shows top 4 priorities, has "Apply this plan" (with Google Cal + ICS export) and "Chat to adjust" buttons. Dismissible per day.
-- `src/components/OnboardingSurvey.jsx` - Full-screen overlay wizard shown on first use. Steps: -1=Welcome, 0=Canvas Connect, 1-5=Survey questions. `onComplete(prefs, canvasConnected)` signature.
+- `src/components/OnboardingSurvey.jsx` - Full-screen overlay wizard shown on first use. Steps: -1=Welcome, 0=class source selector (Canvas/LS/Both), 1=Canvas connect (skipped if LS-only), 2=LS iCal setup (skipped if Canvas-only), 3–7=survey questions. `onComplete(prefs, canvasConnected, lsFeedsAdded)` signature. Navigation via `getNextStep`/`getPrevStep` helpers that respect class source choice.
 - `src/components/SyncButton.jsx` - Sync trigger with status polling and stale indicator.
-- `src/components/Settings.jsx` - Settings panel: Canvas reconnect, preferences (involvement level, study habits), weekly schedule busy-blocks, push notifications toggle.
+- `src/components/Settings.jsx` - Settings panel: Canvas reconnect, Learning Suite iCal feeds (add/edit/delete/sync), preferences (involvement level, study habits), weekly schedule busy-blocks, push notifications toggle.
 - `src/components/StatsPanel.jsx` - Assignment stats with points progress bar.
 - `src/components/Toast.jsx` - Toast notification system.
 - `src/lib/api.js` - `authFetch` (injects Authorization header) and `API_BASE`.
@@ -78,9 +79,10 @@ Table: `assignments`
 - `id`, `title`, `course_name`, `due_date`, `description`, `link`, `status`
 - `is_modified`, `last_scraped_at`, `assignment_type`, `canvas_id`
 - `estimated_minutes`, `planned_start`, `planned_end`, `notes`
-- `source` (`canvas` | `manual`), `canvas_id`
+- `source` (`canvas` | `learning_suite` | `manual`), `canvas_id`, `ls_ical_uid`
 - `point_value` — points possible (always refreshed on re-sync)
 - `is_extra_credit` — BOOLEAN DEFAULT FALSE (migration 010)
+- `ls_ical_uid` — stable UID from iCal VEVENT, used as dedup key for LS feeds (migration 016)
 
 Valid status values: `newly_assigned`, `not_started`, `in_progress`, `submitted`, `unavailable`
 
@@ -100,7 +102,11 @@ Table: `canvas_tokens` — per-user Canvas API tokens (encrypted)
 
 Table: `user_sessions` — per-user LS session cookies
 
-Migrations: `/backend/migrations/` (001–014)
+Table: `ls_ical_feeds` — per-user Learning Suite iCal feed URLs (migration 016)
+- `id`, `user_id`, `url`, `course_name`, `last_synced_at`, `created_at`
+- RLS: users can only read/write their own rows
+
+Migrations: `/backend/migrations/` (001–016)
 
 ## Environment Variables
 
@@ -167,6 +173,7 @@ Involvement level is set in **Settings**, not in the Dashboard header.
 - Stale sync guard: if `_current_task_id` is >10 minutes old it's force-expired so a new sync can start
 - ESLint: all errors/warnings suppressed with inline `// eslint-disable` comments where intentional
 - Chat conversation is persisted in localStorage under `campus-ai-chat`; daily briefing date tracked under `campus-ai-briefing-date`; proactive plan dismissal under `campus-ai-plan-dismissed`
-- Onboarding flow: new users see Welcome → Canvas Connect → Survey overlay on top of Dashboard. Returning users (canvas connected + prefs saved) go straight to Dashboard.
+- Onboarding flow: new users see Welcome → class source (Canvas/LS/Both) → Canvas connect (if needed) → LS iCal setup (if needed) → Survey → Dashboard. Gate is `!hasPrefs` only (not canvas-connected), so LS-only students don't loop. `App.jsx` fires `POST /ls-feeds/sync` fire-and-forget when lsFeedsAdded after onboarding.
+- LS iCal feeds: URL format `https://learningsuite.byu.edu/iCalFeed/ical.php?courseID=XXX`. Found in LS course → Schedule → "Get iCalendar Feed". DTSTART is always date-only (converted to 23:59:59 MT). Non-assignment events (class sessions "Session N:", office hours, TA hours, `***NO CLASS***`) are filtered in `fetch_and_parse`. Stale DB entries (UIDs referencing the feed's courseID but absent from current sync) are deleted in `update_database`.
 - Dashboard layout: two-column CSS grid (`1fr 340px`), max-width 1400px. Right sidebar is sticky with ProactivePlan + AIBriefing + AIChat.
 - Manual assignments (`source === 'manual'`): title, course, and due date are editable in AssignmentDetail modal. Canvas assignments are read-only for those fields.

@@ -954,7 +954,7 @@ def sync_ls_feeds(user_id: str = Depends(get_current_user)):
     for feed in feeds:
         try:
             assignments = fetch_and_parse(feed["url"], feed["course_name"])
-            counts = update_database(assignments, supabase_client=supabase_service, user_id=user_id)
+            counts = update_database(assignments, supabase_client=supabase_service, user_id=user_id, feed_url=feed["url"])
             supabase_service.table("ls_ical_feeds").update(
                 {"last_synced_at": now_iso}
             ).eq("id", feed["id"]).execute()
