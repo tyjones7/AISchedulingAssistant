@@ -82,12 +82,14 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   })
 
   // AI features
-  const [suggestions, setSuggestions] = useState({})
   const [briefing, setBriefing] = useState(null)
   const [isGeneratingAI, setIsGeneratingAI] = useState(false)
+  const [planRefreshKey, setPlanRefreshKey] = useState(0)
+  const [hasSchedule, setHasSchedule] = useState(false)
 
   const involvementLevel = preferences?.involvement_level ?? 'balanced'
   const openChatRef = useRef(null)
+  const autoBriefingFired = useRef(false)
 
 
   const addToast = useCallback((message, type = 'success') => {
@@ -102,8 +104,31 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   useEffect(() => {
     fetchAssignments()
     fetchLastSync()
-    fetchSuggestions()
   }, [])
+
+  // Auto-generate briefing once per day for proactive users
+  useEffect(() => {
+    if (involvementLevel !== 'proactive') return
+    if (autoBriefingFired.current) return
+    const today = new Date().toDateString()
+    const lastDate = localStorage.getItem('campus-ai-briefing-date')
+    if (lastDate === today) return   // already generated today
+    autoBriefingFired.current = true
+    const generate = async () => {
+      setIsGeneratingAI(true)
+      try {
+        const res = await authFetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' })
+        if (res.ok) {
+          const data = await res.json()
+          setBriefing(data.briefing || null)
+          localStorage.setItem('campus-ai-briefing-date', today)
+        }
+      } catch { /* silent — briefing is non-critical */ } finally {
+        setIsGeneratingAI(false)
+      }
+    }
+    generate()
+  }, [involvementLevel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle auto-sync after login
   useEffect(() => {
@@ -167,48 +192,17 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     }
   }
 
-  const fetchSuggestions = async () => {
-    try {
-      const response = await authFetch(`${API_BASE}/ai/suggestions`)
-      if (!response.ok) return
-      const data = await response.json()
-      const map = {}
-      for (const s of (data.suggestions || [])) {
-        map[s.assignment_id] = s
-      }
-      setSuggestions(map)
-    } catch (err) {
-      console.error('[Dashboard] Failed to fetch AI suggestions:', err)
-    }
-  }
-
   const handleGenerateAI = useCallback(async () => {
     if (isGeneratingAI) return
     setIsGeneratingAI(true)
     try {
-      const [suggestionsRes, briefingRes] = await Promise.all([
-        authFetch(`${API_BASE}/ai/suggestions/generate`, { method: 'POST' }),
-        authFetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' }),
-      ])
-
-      if (suggestionsRes.ok) {
-        const data = await suggestionsRes.json()
-        const map = {}
-        for (const s of (data.suggestions || [])) {
-          map[s.assignment_id] = s
-        }
-        setSuggestions(map)
-      }
-
-      if (briefingRes.ok) {
-        const data = await briefingRes.json()
+      const res = await authFetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
         setBriefing(data.briefing || null)
-      }
-
-      if (suggestionsRes.ok || briefingRes.ok) {
-        addToast('AI plan generated!', 'success')
+        addToast('Briefing generated!', 'success')
       } else {
-        addToast('AI generation failed. Make sure GROQ_API_KEY is set.', 'error')
+        addToast('Briefing generation failed. Make sure GROQ_API_KEY is set.', 'error')
       }
     } catch (err) {
       console.error('[Dashboard] handleGenerateAI error:', err)
@@ -392,7 +386,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       onMarkDone={handleMarkDone}
       onOpenDetail={handleOpenDetail}
       isUpdating={updatingIds.has(assignment.id)}
-      suggestion={suggestions[assignment.id] || null}
       compact
     />
   )
@@ -729,12 +722,11 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
             {/* Right: AI sidebar — only on timeline tab */}
             {activeTab === 'timeline' && <div className="dash-side-col">
               <ProactivePlan
-                suggestions={suggestions}
-                assignments={assignments}
                 involvementLevel={involvementLevel}
                 onOpenChat={() => openChatRef.current?.()}
-                onPlanApplied={fetchAssignments}
                 addToast={addToast}
+                refreshKey={planRefreshKey}
+                onBlocksLoaded={(count) => setHasSchedule(count > 0)}
               />
               <AIBriefing briefing={briefing} isGenerating={isGeneratingAI} />
             </div>}
@@ -751,7 +743,13 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
         />
       )}
 
-      <AIChat addToast={addToast} involvementLevel={involvementLevel} openChatRef={openChatRef} />
+      <AIChat
+        addToast={addToast}
+        involvementLevel={involvementLevel}
+        openChatRef={openChatRef}
+        onPlanApplied={() => setPlanRefreshKey(k => k + 1)}
+        hasSchedule={hasSchedule}
+      />
 
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 

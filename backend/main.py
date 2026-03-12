@@ -141,6 +141,7 @@ class UserPreferences(BaseModel):
     weekly_schedule: Optional[list] = None
     work_start: Optional[str] = "08:00"
     work_end: Optional[str] = "22:00"
+    student_context: Optional[str] = ""
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -152,6 +153,7 @@ class UserPreferencesUpdate(BaseModel):
     weekly_schedule: Optional[list] = None
     work_start: Optional[str] = None
     work_end: Optional[str] = None
+    student_context: Optional[str] = None
 
 
 load_dotenv()
@@ -537,15 +539,19 @@ def save_preferences(body: UserPreferencesUpdate, user_id: str = Depends(get_cur
 
 @app.post("/schedule/generate")
 def generate_schedule_endpoint(user_id: str = Depends(get_current_user)):
-    """Delete all planned blocks for the user, then generate a fresh 7-day schedule."""
-    from schedule_service import generate_schedule
+    """Delete all planned blocks for the user, then generate a fresh 7-day AI schedule.
+
+    Uses AI-powered scheduling (Groq) which reasons about priorities, task types,
+    and the student's best focus hours. Falls back to rules-based if AI is unavailable.
+    """
+    from schedule_service import generate_schedule_ai
 
     # Remove existing planned blocks only (keep completed/skipped for history)
     supabase_service.table("time_blocks").delete().eq(
         "user_id", user_id
     ).eq("status", "planned").execute()
 
-    result = generate_schedule(user_id, supabase_service)
+    result = generate_schedule_ai(user_id, supabase_service)
 
     if result["blocks"]:
         supabase_service.table("time_blocks").insert(result["blocks"]).execute()
@@ -647,7 +653,7 @@ def _fetch_active_assignments(user_id: str) -> list[dict]:
     """Shared helper: fetch active assignments for AI context."""
     response = (
         supabase_service.table("assignments")
-        .select("id, title, course_name, due_date, status, estimated_minutes, notes, description, assignment_type, point_value")
+        .select("id, title, course_name, due_date, status, estimated_minutes, notes, description, assignment_type, task_type, point_value")
         .eq("user_id", user_id)
         .not_.in_("status", ["submitted", "unavailable"])
         .execute()
@@ -803,8 +809,21 @@ def generate_ai_briefing(user_id: str = Depends(get_current_user)):
         )
 
     prefs = _fetch_user_preferences(user_id)
+
+    # Pull today's time blocks to make the briefing more specific
+    from datetime import date as _date
+    from zoneinfo import ZoneInfo
+    _today_str = datetime.now(ZoneInfo("America/Denver")).date().isoformat()
     try:
-        briefing = ai_service.generate_briefing(assignments, prefs)
+        _tb = supabase_service.table("time_blocks").select(
+            "*, assignments(title, course_name)"
+        ).eq("user_id", user_id).eq("date", _today_str).order("start_time").execute()
+        today_blocks = _tb.data or []
+    except Exception:
+        today_blocks = []
+
+    try:
+        briefing = ai_service.generate_briefing(assignments, prefs, today_blocks)
     except Exception as e:
         raise _ai_error_to_http(e)
 
@@ -829,11 +848,25 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
     prefs = _fetch_user_preferences(user_id)
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
 
-    logger.info(f"POST /ai/chat user={user_id[:8]} - {len(req.messages)} message(s)")
+    # Fetch current week's time blocks so the AI knows what's already scheduled
+    from datetime import date as _date
+    from zoneinfo import ZoneInfo
+    _mt = ZoneInfo("America/Denver")
+    _today = datetime.now(_mt).date().isoformat()
+    _week_end = (datetime.now(_mt).date() + timedelta(days=7)).isoformat()
+    try:
+        _blocks_resp = supabase_service.table("time_blocks").select(
+            "*, assignments(title, course_name)"
+        ).eq("user_id", user_id).gte("date", _today).lt("date", _week_end).order("start_time").execute()
+        time_blocks = _blocks_resp.data or []
+    except Exception:
+        time_blocks = []
+
+    logger.info(f"POST /ai/chat user={user_id[:8]} - {len(req.messages)} message(s), {len(time_blocks)} blocks in context")
 
     def event_stream():
         try:
-            for chunk in ai_service.chat_stream(messages_dicts, assignments, prefs):
+            for chunk in ai_service.chat_stream(messages_dicts, assignments, prefs, time_blocks):
                 yield f"data: {json.dumps({'delta': chunk})}\n\n"
         except RuntimeError as e:
             yield f"data: {json.dumps({'error': str(e), 'code': 503})}\n\n"
@@ -877,22 +910,117 @@ def ai_apply_plan(req: AIApplyPlanRequest, user_id: str = Depends(get_current_us
         )
 
     valid_ids = {a["id"] for a in assignments}
+    from zoneinfo import ZoneInfo
+    from datetime import time as _time
+    _MOUNTAIN = ZoneInfo("America/Denver")
+
+    # Collect the assignment IDs the plan actually mentions before touching anything
+    mentioned_ids = {
+        item.get("assignment_id", "")
+        for item in plan_items
+        if item.get("assignment_id", "") in valid_ids
+    }
+
+    # Delete only planned blocks for assignments the plan mentions — surgical, not a full wipe.
+    # Completed/skipped blocks are never touched.
+    if mentioned_ids:
+        supabase_service.table("time_blocks").delete().eq(
+            "user_id", user_id
+        ).eq("status", "planned").in_("assignment_id", list(mentioned_ids)).execute()
+
+    new_blocks = []
     updated = []
+
     for item in plan_items:
         aid = item.get("assignment_id", "")
-        planned_start = item.get("planned_start")
-        if aid not in valid_ids or not planned_start:
+        if aid not in valid_ids:
             continue
+
+        date_str = item.get("date") or item.get("planned_start", "")[:10]
+        start_str = item.get("start_time", "")
+        end_str = item.get("end_time", "")
+        label = item.get("label", "")
+
+        if not date_str:
+            continue
+
+        # Build real datetimes if we have times; otherwise use a day-only planned_start
+        if start_str and end_str:
+            try:
+                from datetime import time as _time
+                sh, sm = map(int, start_str.split(":"))
+                eh, em = map(int, end_str.split(":"))
+                from datetime import date as _d
+                day = _d.fromisoformat(date_str)
+                start_dt = datetime.combine(day, _time(sh, sm)).replace(tzinfo=_MOUNTAIN)
+                end_dt   = datetime.combine(day, _time(eh, em)).replace(tzinfo=_MOUNTAIN)
+                if end_dt > start_dt:
+                    new_blocks.append({
+                        "user_id":       user_id,
+                        "assignment_id": aid,
+                        "date":          date_str,
+                        "start_time":    start_dt.isoformat(),
+                        "end_time":      end_dt.isoformat(),
+                        "label":         label,
+                        "status":        "planned",
+                        "plan_version":  1,
+                    })
+                    updated.append({"id": aid, "date": date_str, "start_time": start_str, "end_time": end_str})
+                    # Also update planned_start on the assignment for timeline view
+                    supabase_service.table("assignments").update(
+                        {"planned_start": start_dt.isoformat()}
+                    ).eq("id", aid).eq("user_id", user_id).execute()
+                    continue
+            except Exception as e:
+                logger.warning(f"POST /ai/apply-plan - could not parse times for {aid}: {e}")
+
+        # Fallback: date-only — just update planned_start
         try:
             supabase_service.table("assignments").update(
-                {"planned_start": planned_start}
+                {"planned_start": date_str + "T00:00:00+00:00"}
             ).eq("id", aid).eq("user_id", user_id).execute()
-            updated.append({"id": aid, "planned_start": planned_start})
+            updated.append({"id": aid, "date": date_str})
         except Exception as e:
             logger.warning(f"POST /ai/apply-plan - failed to update {aid}: {e}")
 
-    logger.info(f"POST /ai/apply-plan user={user_id[:8]} - updated {len(updated)} assignment(s)")
-    return {"updated": len(updated), "assignments": updated}
+    if new_blocks:
+        try:
+            supabase_service.table("time_blocks").insert(new_blocks).execute()
+        except Exception as e:
+            logger.error(f"POST /ai/apply-plan - time_blocks insert failed: {e}")
+
+    logger.info(f"POST /ai/apply-plan user={user_id[:8]} - {len(new_blocks)} blocks, {len(updated)} updated")
+    return {"updated": len(updated), "blocks": len(new_blocks), "assignments": updated}
+
+
+class AIContextUpdate(BaseModel):
+    context: str  # New/updated student_context string (full replacement)
+
+
+@app.post("/ai/update-context")
+def update_student_context(req: AIContextUpdate, user_id: str = Depends(get_current_user)):
+    """Persist a student context string to user_preferences.student_context.
+
+    Called when the AI (or user) surfaces important facts about the student's
+    courses or schedule that should inform future AI calls.
+    """
+    context = (req.context or "").strip()[:2000]  # Cap at 2000 chars
+    logger.info(f"POST /ai/update-context user={user_id[:8]} - {len(context)} chars")
+
+    existing = supabase_service.table("user_preferences").select("id").eq(
+        "user_id", user_id
+    ).limit(1).execute()
+
+    if existing.data:
+        supabase_service.table("user_preferences").update(
+            {"student_context": context}
+        ).eq("user_id", user_id).execute()
+    else:
+        supabase_service.table("user_preferences").insert(
+            {"user_id": user_id, "student_context": context}
+        ).execute()
+
+    return {"updated": True, "length": len(context)}
 
 
 # ============== LEARNING SUITE iCAL ROUTES ==============

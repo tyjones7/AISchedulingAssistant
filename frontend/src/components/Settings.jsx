@@ -61,6 +61,11 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState(null)
 
+  // Student context
+  const [studentContext, setStudentContext] = useState(preferences?.student_context || '')
+  const [contextSaving, setContextSaving] = useState(false)
+  const [contextSaved, setContextSaved] = useState(false)
+
   // Push notifications
   const [pushSupported] = useState(() => isPushSupported())
   const [pushPermission, setPushPermission] = useState(() => getPushPermission())
@@ -98,6 +103,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.work_style) setWorkStyle(preferences.work_style)
     if (preferences.involvement_level) setInvolvementLevel(preferences.involvement_level)
     if (preferences.weekly_schedule !== undefined) setSchedule(preferences.weekly_schedule || [])
+    if (preferences.student_context !== undefined) setStudentContext(preferences.student_context || '')
   }, [preferences])
 
   // Load iCal feeds on mount
@@ -240,6 +246,23 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       setCanvasError(err.message || 'Failed to validate token')
     } finally {
       setCanvasLoading(false)
+    }
+  }
+
+  const handleSaveContext = async () => {
+    setContextSaving(true)
+    setContextSaved(false)
+    try {
+      const res = await authFetch(`${API_BASE}/ai/update-context`, {
+        method: 'POST',
+        body: JSON.stringify({ context: studentContext }),
+      })
+      if (res.ok) {
+        setContextSaved(true)
+        setTimeout(() => setContextSaved(false), 2500)
+      }
+    } catch { /* ignore */ } finally {
+      setContextSaving(false)
     }
   }
 
@@ -708,6 +731,35 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                 + Add time block
               </button>
             )}
+          </section>
+
+          {/* AI Profile Section */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">AI Profile</h3>
+            <p className="settings-section-desc">
+              CampusAI saves things it learns about you here — exam dates, how long your courses actually take, recurring commitments. You can edit it directly anytime.
+            </p>
+            <textarea
+              className="settings-context-textarea"
+              value={studentContext}
+              onChange={e => setStudentContext(e.target.value)}
+              placeholder="e.g. Stats 121 midterm is March 20. ECON essays take ~3 hours. I have work every Thursday evening."
+              rows={4}
+              maxLength={2000}
+            />
+            <div className="settings-save-row">
+              {contextSaved && <span className="settings-saved-msg">Saved!</span>}
+              <span className="settings-hint" style={{ flex: 1 }}>
+                {studentContext.length}/2000 characters
+              </span>
+              <button
+                className="settings-save-btn"
+                onClick={handleSaveContext}
+                disabled={contextSaving}
+              >
+                {contextSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
           </section>
         </div>
       </div>

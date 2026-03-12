@@ -5,14 +5,23 @@ import './AIChat.css'
 const STORAGE_KEY = 'campus-ai-chat'
 const BRIEFING_DATE_KEY = 'campus-ai-briefing-date'
 
-const QUICK_CHIPS = [
-  "What's most urgent right now?",
+// Chips shown when no schedule exists yet
+const CHIPS_NO_PLAN = [
   'Build my study plan for this week',
-  'What should I work on tonight?',
+  "What's most urgent right now?",
   'How long will everything take this week?',
+  'What should I work on tonight?',
 ]
 
-function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
+// Chips shown when a schedule already exists
+const CHIPS_HAS_PLAN = [
+  'How does my week look?',
+  'Move tonight's block to tomorrow',
+  'I finished early — what's next?',
+  'I need more time for one of my courses',
+]
+
+function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, onPlanApplied, hasSchedule = false }) {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState(() => {
     try {
@@ -26,6 +35,8 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
   const [isLoading, setIsLoading] = useState(false)
   const [hasPlan, setHasPlan] = useState(false)
   const [isApplying, setIsApplying] = useState(false)
+  const [pendingContext, setPendingContext] = useState(null)   // learned insight to save
+  const [isSavingContext, setIsSavingContext] = useState(false)
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -106,10 +117,17 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [isOpen])
 
-  // Check if the latest assistant message contains a <plan> block
+  // Check latest assistant message for <plan> and <context> tags
   useEffect(() => {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-    setHasPlan(lastAssistant ? lastAssistant.content.includes('<plan>') : false)
+    if (!lastAssistant) { setHasPlan(false); return }
+    setHasPlan(lastAssistant.content.includes('<plan>'))
+    // Extract <context> tag if present and not already pending
+    const ctxMatch = lastAssistant.content.match(/<context>([\s\S]*?)<\/context>/)
+    if (ctxMatch) {
+      const learned = ctxMatch[1].trim()
+      if (learned) setPendingContext(learned)
+    }
   }, [messages])
 
   const sendMessage = useCallback(async (userContent) => {
@@ -246,10 +264,12 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
         addToast(data.detail || 'Failed to apply plan.', 'error')
         return
       }
+      const blockCount = data.blocks || data.updated
       addToast(
-        `Schedule applied! ${data.updated} assignment${data.updated !== 1 ? 's' : ''} updated.`,
+        `Schedule applied! ${blockCount} study block${blockCount !== 1 ? 's' : ''} added to your calendar.`,
         'success'
       )
+      onPlanApplied?.()
     } catch (err) {
       console.error('[AIChat] apply-plan error:', err)
       addToast('Failed to apply plan. Check your connection.', 'error')
@@ -258,13 +278,43 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
     }
   }
 
+  const handleSaveContext = async () => {
+    if (!pendingContext || isSavingContext) return
+    setIsSavingContext(true)
+    try {
+      // Fetch current context first so we append rather than replace
+      const prefsRes = await authFetch(`${API_BASE}/preferences`)
+      const existingContext = prefsRes.ok ? ((await prefsRes.json()).student_context || '') : ''
+      const merged = existingContext
+        ? `${existingContext.trim()} ${pendingContext}`
+        : pendingContext
+      const res = await authFetch(`${API_BASE}/ai/update-context`, {
+        method: 'POST',
+        body: JSON.stringify({ context: merged }),
+      })
+      if (res.ok) {
+        addToast('Saved to your profile!', 'success')
+        setPendingContext(null)
+      } else {
+        addToast('Failed to save context.', 'error')
+      }
+    } catch {
+      addToast('Failed to save context.', 'error')
+    } finally {
+      setIsSavingContext(false)
+    }
+  }
+
   // Render a single message bubble (with optional streaming cursor)
   const renderBubble = (msg, i) => {
     const isLastAssistant =
       msg.role === 'assistant' && i === messages.length - 1 && isLoading
 
-    // Strip <plan>...</plan> from displayed text
-    const displayContent = msg.content.replace(/<plan>[\s\S]*?<\/plan>/g, '').trim()
+    // Strip <plan> and <context> tags from displayed text
+    const displayContent = msg.content
+      .replace(/<plan>[\s\S]*?<\/plan>/g, '')
+      .replace(/<context>[\s\S]*?<\/context>/g, '')
+      .trim()
 
     return (
       <div key={i} className={`ai-chat-bubble ai-bubble-${msg.role}`}>
@@ -366,6 +416,31 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
 
             {messages.map(renderBubble)}
 
+            {/* Context save banner — shown when AI learned something worth remembering */}
+            {pendingContext && !isLoading && (
+              <div className="ai-context-banner">
+                <div className="ai-context-icon">💡</div>
+                <div className="ai-context-text">
+                  <span className="ai-context-label">Learned something new</span>
+                  <span className="ai-context-value">&ldquo;{pendingContext}&rdquo;</span>
+                </div>
+                <div className="ai-context-actions">
+                  <button
+                    className="ai-context-save"
+                    onClick={handleSaveContext}
+                    disabled={isSavingContext}
+                  >
+                    {isSavingContext ? 'Saving…' : 'Save to profile'}
+                  </button>
+                  <button
+                    className="ai-context-dismiss"
+                    onClick={() => setPendingContext(null)}
+                    aria-label="Dismiss"
+                  >✕</button>
+                </div>
+              </div>
+            )}
+
             {/* Apply plan button — shown after the last AI bubble when a plan is detected */}
             {hasPlan && !isLoading && (
               <div className="ai-apply-row">
@@ -399,7 +474,7 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef }) {
           {/* Quick-action chips — only when no conversation yet */}
           {messages.length === 0 && (
             <div className="ai-chat-chips">
-              {QUICK_CHIPS.map((chip) => (
+              {(hasSchedule ? CHIPS_HAS_PLAN : CHIPS_NO_PLAN).map((chip) => (
                 <button
                   key={chip}
                   className="ai-chip"

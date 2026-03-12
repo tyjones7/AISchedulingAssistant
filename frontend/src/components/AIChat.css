@@ -344,6 +344,79 @@
   animation: spin 0.7s linear infinite;
 }
 
+/* ---- Context save banner ---- */
+
+.ai-context-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0.25rem 0.75rem 0.5rem;
+  padding: 0.65rem 0.75rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
+.ai-context-icon { font-size: 0.9rem; flex-shrink: 0; margin-top: 1px; }
+
+.ai-context-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ai-context-label {
+  font-weight: 600;
+  color: #92400e;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ai-context-value {
+  color: #78350f;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.ai-context-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.ai-context-save {
+  background: #f59e0b;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+.ai-context-save:hover:not(:disabled) { background: #d97706; }
+.ai-context-save:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.ai-context-dismiss {
+  background: none;
+  border: none;
+  color: #d97706;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.2rem;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.ai-context-dismiss:hover { color: #92400e; }
+
 /* ---- Quick-action chips ---- */
 
 .ai-chat-chips {
