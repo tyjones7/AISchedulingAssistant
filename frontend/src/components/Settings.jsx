@@ -54,6 +54,14 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [icalSyncResult, setIcalSyncResult] = useState(null)
   const [showIcalAdd, setShowIcalAdd] = useState(false)
 
+  // Classification review modal
+  const [reviewFeedId, setReviewFeedId] = useState(null)
+  const [reviewCourseName, setReviewCourseName] = useState('')
+  const [reviewItems, setReviewItems] = useState([])   // [{id, title, content_type, due_date}]
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewSaving, setReviewSaving] = useState(false)
+  const [feedPendingCounts, setFeedPendingCounts] = useState({})  // {feed_id: count}
+
   // iCal inline edit
   const [editingFeedId, setEditingFeedId] = useState(null)
   const [editCourse, setEditCourse] = useState('')
@@ -106,12 +114,26 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.student_context !== undefined) setStudentContext(preferences.student_context || '')
   }, [preferences])
 
-  // Load iCal feeds on mount
+  // Load iCal feeds on mount, then fetch pending review counts for each
   useEffect(() => {
     authFetch(`${API_BASE}/ls-feeds`).then(async (res) => {
       if (!res.ok) return
       const data = await res.json()
-      setIcalFeeds(data.feeds || [])
+      const feeds = data.feeds || []
+      setIcalFeeds(feeds)
+      // Load pending counts in parallel
+      const countEntries = await Promise.all(
+        feeds.map(async (feed) => {
+          try {
+            const r = await authFetch(`${API_BASE}/ls-feeds/${feed.id}/pending-review`)
+            if (!r.ok) return null
+            const d = await r.json()
+            return d.items?.length > 0 ? [feed.id, d.items.length] : null
+          } catch { return null }
+        })
+      )
+      const pending = Object.fromEntries(countEntries.filter(Boolean))
+      if (Object.keys(pending).length > 0) setFeedPendingCounts(pending)
     }).catch(() => {})
   }, [])
 
@@ -182,10 +204,56 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       const updated = data.results.reduce((s, r) => s + (r.modified || 0), 0)
       setIcalSyncResult(`Synced ${data.synced} course(s): ${added} new, ${updated} updated`)
       setTimeout(() => setIcalSyncResult(null), 4000)
+      // Track pending review counts per feed
+      const pending = {}
+      for (const r of (data.results || [])) {
+        if (r.feed_id && r.pending_review > 0) pending[r.feed_id] = r.pending_review
+      }
+      setFeedPendingCounts(prev => ({ ...prev, ...pending }))
     } catch (err) {
       setIcalError(err.message || 'Sync failed')
     } finally {
       setIcalSyncing(false)
+    }
+  }
+
+  const openReview = async (feedId, courseName) => {
+    setReviewFeedId(feedId)
+    setReviewCourseName(courseName)
+    setReviewLoading(true)
+    try {
+      const res = await authFetch(`${API_BASE}/ls-feeds/${feedId}/pending-review`)
+      if (res.ok) {
+        const data = await res.json()
+        setReviewItems(data.items || [])
+      }
+    } catch { /**/ } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  const toggleReviewItem = (id) => {
+    setReviewItems(prev => prev.map(it =>
+      it.id === id
+        ? { ...it, content_type: it.content_type === 'graded' ? 'course_content' : 'graded' }
+        : it
+    ))
+  }
+
+  const handleConfirmReview = async () => {
+    setReviewSaving(true)
+    try {
+      const res = await authFetch(`${API_BASE}/ls-feeds/${reviewFeedId}/confirm-classifications`, {
+        method: 'POST',
+        body: JSON.stringify({ items: reviewItems.map(it => ({ id: it.id, content_type: it.content_type })) }),
+      })
+      if (res.ok) {
+        setFeedPendingCounts(prev => { const n = { ...prev }; delete n[reviewFeedId]; return n })
+        setReviewFeedId(null)
+        setReviewItems([])
+      }
+    } catch { /**/ } finally {
+      setReviewSaving(false)
     }
   }
 
@@ -443,8 +511,19 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                               Last synced {new Date(feed.last_synced_at).toLocaleDateString()}
                             </span>
                           )}
+                          {feedPendingCounts[feed.id] > 0 && (
+                            <span className="ical-review-badge">
+                              {feedPendingCounts[feed.id]} need review
+                            </span>
+                          )}
                         </div>
                         <div className="ical-feed-actions">
+                          {feedPendingCounts[feed.id] > 0 && (
+                            <button
+                              className="settings-review-btn"
+                              onClick={() => openReview(feed.id, feed.course_name)}
+                            >Review</button>
+                          )}
                           <button
                             className="schedule-block-edit"
                             onClick={() => handleIcalEditStart(feed)}
@@ -763,6 +842,93 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
           </section>
         </div>
       </div>
+
+      {/* Classification Review Modal */}
+      {reviewFeedId && (
+        <div className="review-backdrop" onClick={(e) => e.target === e.currentTarget && setReviewFeedId(null)}>
+          <div className="review-modal">
+            <div className="review-modal-header">
+              <div>
+                <h3 className="review-modal-title">Review assignments</h3>
+                <p className="review-modal-subtitle">{reviewCourseName} — We classified these with AI. Move anything that&apos;s wrong.</p>
+              </div>
+              <button className="settings-close" onClick={() => setReviewFeedId(null)} aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {reviewLoading ? (
+              <div className="review-loading">Classifying with AI…</div>
+            ) : reviewItems.length === 0 ? (
+              <div className="review-loading">Nothing to review.</div>
+            ) : (
+              <>
+                <div className="review-columns">
+                  <div className="review-col">
+                    <div className="review-col-header review-col-graded">
+                      <span className="review-col-icon">✓</span> Assignments
+                      <span className="review-col-count">{reviewItems.filter(i => i.content_type === 'graded').length}</span>
+                    </div>
+                    <ul className="review-list">
+                      {reviewItems.filter(i => i.content_type === 'graded').map(item => (
+                        <li key={item.id} className="review-item">
+                          <span className="review-item-title">{item.title}</span>
+                          {item.due_date && (
+                            <span className="review-item-due">
+                              {new Date(item.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                          <button className="review-move-btn" onClick={() => toggleReviewItem(item.id)} title="Move to Class Content">
+                            →
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="review-col">
+                    <div className="review-col-header review-col-content">
+                      <span className="review-col-icon">✕</span> Hidden from dashboard
+                      <span className="review-col-count">{reviewItems.filter(i => i.content_type === 'course_content').length}</span>
+                    </div>
+                    <ul className="review-list">
+                      {reviewItems.filter(i => i.content_type === 'course_content').map(item => (
+                        <li key={item.id} className="review-item review-item-hidden">
+                          <span className="review-item-title">{item.title}</span>
+                          {item.due_date && (
+                            <span className="review-item-due">
+                              {new Date(item.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                          <button className="review-move-btn review-move-back" onClick={() => toggleReviewItem(item.id)} title="Move to Assignments">
+                            ←
+                          </button>
+                        </li>
+                      ))}
+                      {reviewItems.filter(i => i.content_type === 'course_content').length === 0 && (
+                        <li className="review-empty">Nothing hidden</li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="review-modal-footer">
+                  <p className="review-footer-hint">Tap → to hide an item, ← to restore it.</p>
+                  <button
+                    className="settings-primary-btn"
+                    onClick={handleConfirmReview}
+                    disabled={reviewSaving}
+                  >
+                    {reviewSaving ? 'Saving…' : 'Confirm & apply'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

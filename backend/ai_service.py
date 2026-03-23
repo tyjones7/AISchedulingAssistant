@@ -131,18 +131,40 @@ def _relative_due(due_iso: Optional[str]) -> str:
         return f"due {due_iso}"
 
 
-def _build_assignment_context(assignments: list[dict]) -> str:
+def _build_assignment_context(assignments: list[dict], completed_minutes: Optional[dict] = None) -> str:
     """Format assignments into a concise numbered list for prompt injection."""
-    today = date.today()
-    lines = [f"Today is {today.strftime('%A, %B %d, %Y')}."]
+    from zoneinfo import ZoneInfo
+    _MT = ZoneInfo("America/Denver")
+    now_mt = datetime.now(_MT)
+    today = now_mt.date()
+    lines = [
+        f"Today is {now_mt.strftime('%A, %B %d, %Y')}. Current time: {now_mt.strftime('%-I:%M %p')} Mountain Time."
+    ]
     lines.append(f"The student has {len(assignments)} active assignment(s):\n")
+
+    total_remaining_min = 0
+    missing_est_count = 0
+
     for a in assignments:
         title = a.get("title", "Untitled")
         course = a.get("course_name", "Unknown")
         status = a.get("status", "not_started")
         due_label = _relative_due(a.get("due_date"))
         est = a.get("estimated_minutes")
-        est_str = f", est. {est} min" if est else " [NO TIME ESTIMATE — ask student]"
+        aid = a.get("id", "")
+
+        if est:
+            done = int((completed_minutes or {}).get(aid, 0))
+            remaining = max(0, est - done)
+            total_remaining_min += remaining
+            if done > 0:
+                est_str = f", {remaining} min remaining ({done} min completed)"
+            else:
+                est_str = f", est. {est} min"
+        else:
+            est_str = " [NO TIME ESTIMATE — ask student]"
+            missing_est_count += 1
+
         notes = (a.get("notes") or "").strip()
         notes_str = f', notes: "{notes[:80]}"' if notes else ""
         atype = a.get("assignment_type") or ""
@@ -153,10 +175,19 @@ def _build_assignment_context(assignments: list[dict]) -> str:
         pts_str = f", {pts:g} pts" if pts is not None else ""
         desc = (a.get("description") or "").strip()
         desc_str = f'\n      Description: "{desc[:200]}"' if desc else ""
-        aid = a.get("id", "")
         lines.append(
             f'  - ID:{aid} | "{title}"{type_str}{ttype_str} ({course}) | {status} | {due_label}{pts_str}{est_str}{notes_str}{desc_str}'
         )
+
+    # Workload summary — the most actionable single number for scheduling
+    if total_remaining_min > 0:
+        h, m = divmod(total_remaining_min, 60)
+        total_str = f"{h}h {m}m" if h and m else (f"{h}h" if h else f"{m}m")
+        summary = f"\nTotal estimated work remaining this week: {total_str}"
+        if missing_est_count:
+            summary += f" (plus {missing_est_count} assignment(s) with no time estimate)"
+        lines.append(summary)
+
     return "\n".join(lines)
 
 
@@ -235,17 +266,6 @@ Each item must have exactly: assignment_id, priority_score (int), suggested_star
 Example:
 {"suggestions":[{"assignment_id":"abc-123","priority_score":9,"suggested_start":"2026-02-19","rationale":"Overdue and not started \u2014 do this first.","estimated_minutes":60}]}"""
 
-_BRIEFING_SYSTEM = """\
-You are CampusAI, a friendly academic scheduling assistant for BYU students.
-Write a concise daily briefing (2–4 sentences) for the student based on their assignments and today's scheduled study blocks.
-
-Rules:
-- Lead with what they should do TODAY specifically (name the assignment and ideally the time)
-- Mention the most urgent item(s) and why
-- Be encouraging but honest about deadlines
-- Do NOT use bullet points or headers — write flowing sentences
-- Keep it under 80 words total"""
-
 _SCHEDULE_SYSTEM = """\
 You are an expert academic scheduling assistant for BYU students.
 Your job: given a student's free time slots and active assignments, build the optimal weekly study schedule.
@@ -285,43 +305,48 @@ Rules:
 - Keep it under 80 words total"""
 
 _CHAT_SYSTEM_TEMPLATE = """\
-You are CampusAI, a friendly and practical academic scheduling assistant for BYU students.
-You have full context of the student's assignments, schedule, and preferences.
+You are CampusAI, a sharp and practical academic scheduling assistant for BYU students.
+You have complete real-time context: assignments, deadlines, exact free time windows, current schedule, and personal preferences.
 
 {context}
 
+{free_slots_context}
+
 {schedule_context}
 
-Your role:
-- Help decide what to work on and when
-- Give concrete, actionable advice (not vague platitudes)
-- Be encouraging but honest about deadlines
-- Keep responses concise (2–5 sentences for simple questions)
-- When the student mentions something important (e.g. an exam date, how long a course's work actually takes), note it for context
+## Scheduling philosophy
+1. Urgency first: Overdue > Due today > Due tomorrow > Due this week. Never bury the lead.
+2. Use the free slots: When free time windows are listed above, anchor every recommendation to a SPECIFIC window. Never say "sometime this week" — say "Tuesday 7–9pm."
+3. Work backwards from deadlines: If something is due in 3 days and needs 4 hours, it must start TODAY.
+4. Flag overload plainly: If total estimated work exceeds total free time, state this directly and help the student cut or compress.
+5. Respect preferences: batch workers get fewer longer sessions; spread-out workers get daily chunks. Honor the preferred study time window.
+6. No fluff: Commit to a specific recommendation. Avoid hedging.
 
-Clarifying questions:
-- For any assignment with [NO TIME ESTIMATE — ask student], ask one brief question to understand the scope.
-  For example: "What does the assignment involve — is it a paper, problem set, or something else? Roughly how long do you expect it to take?"
-  Only ask about one unknown per message to avoid overwhelming the student.
+## Response format
+- "What should I work on now/tonight/today?" → Name ONE assignment, ONE specific time block, one sentence of why. Be direct.
+- Full schedule request → Day-by-day breakdown with exact times for every assignment needing work this week.
+- Schedule adjustment → State what changed, give revised blocks, flag if any deadline gets risky.
+- General question → 2–3 sentences, direct answer.
 
-When you build or adjust a study plan, lay it out day by day with specific times.
-At the end of any response that includes a concrete schedule with specific dates AND times, append a machine-readable block in EXACTLY this format (no spaces around tags):
+## Clarifying questions
+For any assignment marked [NO TIME ESTIMATE — ask student], ask one brief scoped question before scheduling it.
+Only ask about one unknown per reply.
+
+## Machine-readable plan
+At the end of any response with a concrete schedule (specific dates AND times), append EXACTLY:
 <plan>{{"blocks":[{{"assignment_id":"<uuid>","date":"YYYY-MM-DD","start_time":"HH:MM","end_time":"HH:MM","label":"Short label"}}]}}</plan>
 
-Guidelines for the <plan> block:
-- Use 24-hour HH:MM times in Mountain Time
-- Only include it when giving a concrete schedule with specific dates and times
-- Do NOT include it for general advice, single-question answers, or vague "start Monday" suggestions
-- When adjusting an existing schedule, include ALL blocks for the week (not just the changed ones)
+- Times are 24-hour Mountain Time
+- Only include when you have specific dates AND times
+- When adjusting an existing schedule, include ALL blocks for the affected days (not just changed ones)
+- Do NOT include for general advice, single-priority answers, or vague suggestions
 
-Context learning:
-When the student tells you something specific and durable that would improve future scheduling
-(e.g. an exam date, how long a course's work actually takes, a recurring commitment, a difficulty level),
-append a <context> tag at the very end of your response (after the <plan> block if any):
-<context>One-sentence summary of what you learned, e.g. "Stats 121 midterm is March 20. ECON essays take ~3h not 60 min."</context>
-Only include <context> when you learn something genuinely new and useful. Do NOT include it for every message.
+## Context learning
+When the student tells you something durable and scheduling-relevant (exam date, realistic course time, recurring commitment), append:
+<context>One sentence: what you learned.</context>
+Only when genuinely new information is shared.
 
-Do NOT mention that you are Groq or any specific AI model. You are CampusAI."""
+Do NOT mention Groq or any AI model name. You are CampusAI."""
 
 _EXTRACT_SYSTEM_TEMPLATE = """\
 You are a data extraction assistant. Given a conversation between a student and CampusAI,
@@ -342,6 +367,70 @@ Respond ONLY with valid JSON. No markdown, no explanation."""
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
+
+def classify_ls_events(items: list[dict], course_name: str) -> dict[str, str]:
+    """Classify Learning Suite iCal events as 'graded' or 'course_content'.
+
+    Args:
+        items: List of {"uid": str, "title": str} dicts
+        course_name: Human-readable course name (used in the prompt for context)
+
+    Returns:
+        Dict mapping uid → "graded" | "course_content"
+    """
+    if not items:
+        return {}
+
+    client = _get_groq_client()
+
+    numbered = "\n".join(f'{i+1}. {it["title"]}' for i, it in enumerate(items))
+    prompt = f"""\
+You are classifying calendar events from a BYU university course called "{course_name}".
+
+Classify each event as exactly one of:
+- "graded": something the student must complete and submit (assignment, quiz, exam, reflection, project, peer review, survey, lab report)
+- "course_content": class session topic, professor's reading guide, study instructions, in-class activity not submitted externally, announcement, or anything that is NOT a student deliverable
+
+Events:
+{numbered}
+
+Respond ONLY with a JSON array. No markdown, no explanation.
+Format: [{{"index": 1, "content_type": "graded"}}, {{"index": 2, "content_type": "course_content"}}, ...]"""
+
+    try:
+        resp = client.chat.completions.create(
+            model=_FAST_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=512,
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        parsed = json.loads(raw)
+        result = {}
+        for entry in parsed:
+            idx = entry.get("index", 0) - 1
+            ct = entry.get("content_type", "graded")
+            if 0 <= idx < len(items):
+                uid = items[idx]["uid"]
+                result[uid] = ct if ct in ("graded", "course_content") else "graded"
+        # Default anything not returned to graded (fail safe)
+        for it in items:
+            if it["uid"] not in result:
+                result[it["uid"]] = "graded"
+        logger.info(f"[ai_service] classify_ls_events: {len(items)} items, "
+                    f"{sum(1 for v in result.values() if v == 'course_content')} course_content")
+        return result
+    except Exception as e:
+        logger.error(f"[ai_service] classify_ls_events failed: {e}")
+        # Fail open — treat everything as graded so nothing is silently lost
+        return {it["uid"]: "graded" for it in items}
+
 
 def generate_suggestions(assignments: list[dict], prefs: Optional[dict] = None) -> list[dict]:
     """Generate AI priority suggestions for a batch of active assignments.
@@ -520,27 +609,33 @@ def chat_stream(
     assignments: list[dict],
     prefs: Optional[dict] = None,
     time_blocks: Optional[list[dict]] = None,
+    free_slots_text: Optional[str] = None,
+    completed_minutes: Optional[dict] = None,
 ):
     """Yield delta strings from a streaming Groq chat completion.
 
     Uses llama-3.3-70b-versatile with stream=True.
-    Injects current schedule (time_blocks) into the system prompt so the AI
-    knows what is already planned and can adjust it intelligently.
+    Injects assignment context, pre-computed free slots, existing schedule,
+    completed work, and user profile into the system prompt.
 
     Args:
         messages: Conversation history [{role, content}]
         assignments: Active assignments for context injection
         prefs: User preferences
-        time_blocks: Current week's time blocks for schedule context
+        time_blocks: Current week's time blocks (planned/completed/skipped)
+        free_slots_text: Pre-formatted free time windows from schedule_service
+        completed_minutes: Dict of {assignment_id: minutes_completed} for crediting done work
 
     Yields:
         str — each text chunk from the model
     """
     client = _get_groq_client()
-    context = _build_assignment_context(assignments) + _build_profile_context(prefs)
+    context = _build_assignment_context(assignments, completed_minutes) + _build_profile_context(prefs)
     schedule_context = _build_schedule_context(time_blocks or [])
+    free_slots_context = free_slots_text or "Free time windows not available — use the student's class schedule to infer availability."
     system_prompt = _CHAT_SYSTEM_TEMPLATE.format(
         context=context,
+        free_slots_context=free_slots_context,
         schedule_context=schedule_context,
     )
 
@@ -549,14 +644,15 @@ def chat_stream(
     logger.info(
         f"[ai_service] chat_stream: {len(messages)} msg(s), "
         f"{len(assignments)} assignment(s), "
-        f"{len(time_blocks or [])} time block(s) in context"
+        f"{len(time_blocks or [])} block(s), "
+        f"free_slots={'yes' if free_slots_text else 'no'}"
     )
 
     stream = client.chat.completions.create(
         model=_CHAT_MODEL,
         messages=groq_messages,
-        temperature=0.7,
-        max_tokens=1500,
+        temperature=0.4,
+        max_tokens=2048,
         stream=True,
     )
 

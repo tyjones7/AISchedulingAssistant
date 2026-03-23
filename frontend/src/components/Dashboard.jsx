@@ -128,7 +128,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       }
     }
     generate()
-  }, [involvementLevel]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [involvementLevel])
 
   // Handle auto-sync after login
   useEffect(() => {

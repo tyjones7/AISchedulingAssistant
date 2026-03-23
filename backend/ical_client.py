@@ -182,7 +182,7 @@ def update_database(assignments: list[dict], supabase_client=None, user_id: str 
             return {"new": 0, "modified": 0, "unchanged": 0, "errors": len(assignments)}
         supabase = create_client(url, key)
 
-    counts = {"new": 0, "modified": 0, "unchanged": 0, "errors": 0}
+    counts = {"new": 0, "modified": 0, "unchanged": 0, "errors": 0, "new_items": []}
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # Bulk-fetch existing records for this user that have ls_ical_uid set
@@ -248,8 +248,16 @@ def update_database(assignments: list[dict], supabase_client=None, user_id: str 
                 counts["modified"] += 1
             else:
                 metadata_fields["status"] = "newly_assigned"
-                supabase.table("assignments").insert(metadata_fields).execute()
+                metadata_fields["classification_confirmed"] = False
+                inserted = supabase.table("assignments").insert(metadata_fields).execute()
                 counts["new"] += 1
+                if inserted.data:
+                    row = inserted.data[0]
+                    counts["new_items"].append({
+                        "id": row["id"],
+                        "uid": ls_ical_uid,
+                        "title": a["title"],
+                    })
 
         except Exception as e:
             logger.error(f"iCal DB error for uid={ls_ical_uid}: {e}")

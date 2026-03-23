@@ -16,8 +16,8 @@ const CHIPS_NO_PLAN = [
 // Chips shown when a schedule already exists
 const CHIPS_HAS_PLAN = [
   'How does my week look?',
-  'Move tonight's block to tomorrow',
-  'I finished early — what's next?',
+  "Move tonight's block to tomorrow",
+  "I finished early \u2014 what's next?",
   'I need more time for one of my courses',
 ]
 

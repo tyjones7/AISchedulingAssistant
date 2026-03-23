@@ -73,6 +73,61 @@ function formatGoogleDate(date) {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
 }
 
+/**
+ * Export a full week of time blocks as a single ICS file.
+ * Each block becomes its own calendar event with the correct start/end time.
+ *
+ * @param {Array} blocks  - time_blocks from GET /schedule/week
+ * @param {string} weekStart - "YYYY-MM-DD" label for the filename
+ */
+export function downloadTimeBlocksICS(blocks, weekStart) {
+  const events = blocks
+    .filter(b => b.status !== 'skipped')
+    .map(block => {
+      const start = new Date(block.start_time)
+      const end   = new Date(block.end_time)
+      const asgn  = block.assignments || {}
+      const title = block.label || asgn.title || 'Study block'
+      const course = asgn.course_name || ''
+      const descParts = []
+      if (course) descParts.push(`Course: ${course}`)
+      if (asgn.estimated_minutes) descParts.push(`Estimated: ${asgn.estimated_minutes} min`)
+
+      return [
+        'BEGIN:VEVENT',
+        `UID:${block.id || generateUID()}@campusai`,
+        `DTSTART:${formatICSDate(start)}`,
+        `DTEND:${formatICSDate(end)}`,
+        `SUMMARY:${title}`,
+        descParts.length ? `DESCRIPTION:${descParts.join('\\n')}` : null,
+        `DTSTAMP:${formatICSDate(new Date())}`,
+        'END:VEVENT',
+      ].filter(Boolean).join('\r\n')
+    })
+
+  const icsContent = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//CampusAI//Study Schedule//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'X-WR-CALNAME:CampusAI Study Plan',
+    ...events,
+    'END:VCALENDAR',
+  ].join('\r\n')
+
+  const label = weekStart ? `week-of-${weekStart}` : 'study-plan'
+  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' })
+  const url  = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `campusai-${label}.ics`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 export function downloadMultiICS(assignments) {
   const events = assignments.map((assignment) => {
     const event = buildCalendarEvent(assignment)

@@ -266,13 +266,19 @@ def delete_canvas_token(user_id: str = Depends(get_current_user)):
 @app.get("/assignments")
 def get_assignments(
     exclude_past_submitted: bool = Query(default=False),
+    include_course_content: bool = Query(default=False),
     user_id: str = Depends(get_current_user),
 ):
-    """Get assignments. Pass exclude_past_submitted=true to skip submitted past-due items."""
+    """Get assignments. Filters out course_content items by default.
+
+    Pass include_course_content=true to include class topics, reading guides, etc.
+    Pass exclude_past_submitted=true to skip submitted past-due items.
+    """
     query = supabase_service.table("assignments").select("*").eq("user_id", user_id).order("due_date")
+    if not include_course_content:
+        query = query.neq("content_type", "course_content")
     if exclude_past_submitted:
         now_iso = datetime.now(timezone.utc).isoformat()
-        # Return assignments where status is not submitted, OR due_date is in the future
         query = query.or_(f"status.neq.submitted,due_date.gte.{now_iso}")
     response = query.execute()
     return {"assignments": response.data}
@@ -546,29 +552,33 @@ def generate_schedule_endpoint(user_id: str = Depends(get_current_user)):
     """
     from schedule_service import generate_schedule_ai
 
-    # Remove existing planned blocks only (keep completed/skipped for history)
-    supabase_service.table("time_blocks").delete().eq(
-        "user_id", user_id
-    ).eq("status", "planned").execute()
+    try:
+        # Remove existing planned blocks only (keep completed/skipped for history)
+        supabase_service.table("time_blocks").delete().eq(
+            "user_id", user_id
+        ).eq("status", "planned").execute()
 
-    result = generate_schedule_ai(user_id, supabase_service)
+        result = generate_schedule_ai(user_id, supabase_service)
 
-    if result["blocks"]:
-        supabase_service.table("time_blocks").insert(result["blocks"]).execute()
+        if result["blocks"]:
+            supabase_service.table("time_blocks").insert(result["blocks"]).execute()
 
-    # Return saved blocks with assignment info joined
-    from datetime import date as _date
-    today = _date.today().isoformat()
-    week_end = (_date.today() + timedelta(days=7)).isoformat()
-    saved = supabase_service.table("time_blocks").select(
-        "*, assignments(title, course_name, task_type, estimated_minutes)"
-    ).eq("user_id", user_id).gte("date", today).lt("date", week_end).order("start_time").execute()
+        # Return saved blocks with assignment info joined
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        week_end = (_date.today() + timedelta(days=7)).isoformat()
+        saved = supabase_service.table("time_blocks").select(
+            "*, assignments(title, course_name, task_type, estimated_minutes)"
+        ).eq("user_id", user_id).gte("date", today).lt("date", week_end).order("start_time").execute()
 
-    return {
-        "blocks": saved.data or [],
-        "overbooked": result["overbooked"],
-        "total_blocks": len(result["blocks"]),
-    }
+        return {
+            "blocks": saved.data or [],
+            "overbooked": result["overbooked"],
+            "total_blocks": len(result["blocks"]),
+        }
+    except Exception as e:
+        logger.error(f"POST /schedule/generate failed for user={user_id[:8]}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/schedule/week")
@@ -848,12 +858,12 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
     prefs = _fetch_user_preferences(user_id)
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
 
-    # Fetch current week's time blocks so the AI knows what's already scheduled
-    from datetime import date as _date
     from zoneinfo import ZoneInfo
     _mt = ZoneInfo("America/Denver")
     _today = datetime.now(_mt).date().isoformat()
     _week_end = (datetime.now(_mt).date() + timedelta(days=7)).isoformat()
+
+    # Fetch current week's time blocks so the AI knows what's already scheduled
     try:
         _blocks_resp = supabase_service.table("time_blocks").select(
             "*, assignments(title, course_name)"
@@ -862,11 +872,46 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
     except Exception:
         time_blocks = []
 
-    logger.info(f"POST /ai/chat user={user_id[:8]} - {len(req.messages)} message(s), {len(time_blocks)} blocks in context")
+    # Compute exact free time windows (same data used by auto-generate)
+    try:
+        from schedule_service import compute_free_slots, format_free_slots_for_ai
+        free_slots_by_day = compute_free_slots(prefs, days=7)
+        free_slots_text = format_free_slots_for_ai(free_slots_by_day)
+    except Exception as e:
+        logger.warning(f"POST /ai/chat: free slot computation failed: {e}")
+        free_slots_text = None
+
+    # Tally completed block minutes per assignment so AI knows remaining work
+    try:
+        _completed_resp = supabase_service.table("time_blocks").select(
+            "assignment_id, start_time, end_time"
+        ).eq("user_id", user_id).eq("status", "completed").execute()
+        completed_minutes: dict = {}
+        for cb in (_completed_resp.data or []):
+            aid = cb.get("assignment_id")
+            if not aid:
+                continue
+            try:
+                s = datetime.fromisoformat(cb["start_time"].replace("Z", "+00:00"))
+                e = datetime.fromisoformat(cb["end_time"].replace("Z", "+00:00"))
+                completed_minutes[aid] = completed_minutes.get(aid, 0) + int((e - s).total_seconds() / 60)
+            except Exception:
+                pass
+    except Exception:
+        completed_minutes = {}
+
+    logger.info(
+        f"POST /ai/chat user={user_id[:8]} - {len(req.messages)} msg(s), "
+        f"{len(time_blocks)} blocks, free_slots={'yes' if free_slots_text else 'no'}"
+    )
 
     def event_stream():
         try:
-            for chunk in ai_service.chat_stream(messages_dicts, assignments, prefs, time_blocks):
+            for chunk in ai_service.chat_stream(
+                messages_dicts, assignments, prefs, time_blocks,
+                free_slots_text=free_slots_text,
+                completed_minutes=completed_minutes,
+            ):
                 yield f"data: {json.dumps({'delta': chunk})}\n\n"
         except RuntimeError as e:
             yield f"data: {json.dumps({'error': str(e), 'code': 503})}\n\n"
@@ -898,10 +943,28 @@ def ai_apply_plan(req: AIApplyPlanRequest, user_id: str = Depends(get_current_us
     assignments = _fetch_active_assignments(user_id)
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
 
-    try:
-        plan_items = ai_service.extract_plan(messages_dicts, assignments)
-    except Exception as e:
-        raise _ai_error_to_http(e)
+    # Fast path: parse the <plan> tag the AI already embedded — no extra LLM call needed
+    import re as _re
+    plan_items = None
+    for msg in reversed(messages_dicts):
+        if msg["role"] == "assistant":
+            plan_match = _re.search(r'<plan>([\s\S]*?)</plan>', msg["content"])
+            if plan_match:
+                try:
+                    plan_data = json.loads(plan_match.group(1).strip())
+                    if isinstance(plan_data, dict) and "blocks" in plan_data:
+                        plan_items = plan_data["blocks"]
+                        logger.info(f"POST /ai/apply-plan: parsed <plan> tag directly ({len(plan_items)} blocks)")
+                except Exception as e:
+                    logger.warning(f"POST /ai/apply-plan: <plan> tag parse failed, falling back to extract: {e}")
+            break
+
+    # Fallback: run LLM extraction if no valid <plan> tag was found
+    if plan_items is None:
+        try:
+            plan_items = ai_service.extract_plan(messages_dicts, assignments)
+        except Exception as e:
+            raise _ai_error_to_http(e)
 
     if not plan_items:
         raise HTTPException(
@@ -966,10 +1029,11 @@ def ai_apply_plan(req: AIApplyPlanRequest, user_id: str = Depends(get_current_us
                         "plan_version":  1,
                     })
                     updated.append({"id": aid, "date": date_str, "start_time": start_str, "end_time": end_str})
-                    # Also update planned_start on the assignment for timeline view
-                    supabase_service.table("assignments").update(
-                        {"planned_start": start_dt.isoformat()}
-                    ).eq("id", aid).eq("user_id", user_id).execute()
+                    # Update planned_start + planned_end on the assignment for timeline / ICS export
+                    supabase_service.table("assignments").update({
+                        "planned_start": start_dt.isoformat(),
+                        "planned_end":   end_dt.isoformat(),
+                    }).eq("id", aid).eq("user_id", user_id).execute()
                     continue
             except Exception as e:
                 logger.warning(f"POST /ai/apply-plan - could not parse times for {aid}: {e}")
@@ -1021,6 +1085,42 @@ def update_student_context(req: AIContextUpdate, user_id: str = Depends(get_curr
         ).execute()
 
     return {"updated": True, "length": len(context)}
+
+
+# ============== LS CLASSIFICATION HELPERS ==============
+
+def _classify_and_save(new_items: list[dict], course_name: str) -> None:
+    """AI-classify a batch of new LS items and write content_type back to DB."""
+    try:
+        mapping = ai_service.classify_ls_events(
+            [{"uid": it["uid"], "title": it["title"]} for it in new_items],
+            course_name,
+        )
+        for it in new_items:
+            ct = mapping.get(it["uid"], "graded")
+            supabase_service.table("assignments").update(
+                {"content_type": ct}
+            ).eq("id", it["id"]).execute()
+        logger.info(f"_classify_and_save: classified {len(new_items)} items for {course_name!r}")
+    except Exception as e:
+        logger.error(f"_classify_and_save failed: {e}")
+
+
+def _count_pending_review(user_id: str, feed_id: str) -> int:
+    """Count assignments for this feed awaiting user review (classification_confirmed=false)."""
+    try:
+        feed_resp = supabase_service.table("ls_ical_feeds").select("url, course_name").eq(
+            "id", feed_id
+        ).limit(1).execute()
+        if not feed_resp.data:
+            return 0
+        course_name = feed_resp.data[0]["course_name"]
+        resp = supabase_service.table("assignments").select("id", count="exact").eq(
+            "user_id", user_id
+        ).eq("course_name", course_name).eq("classification_confirmed", False).execute()
+        return resp.count or 0
+    except Exception:
+        return 0
 
 
 # ============== LEARNING SUITE iCAL ROUTES ==============
@@ -1086,12 +1186,81 @@ def sync_ls_feeds(user_id: str = Depends(get_current_user)):
             supabase_service.table("ls_ical_feeds").update(
                 {"last_synced_at": now_iso}
             ).eq("id", feed["id"]).execute()
-            results.append({"feed_id": feed["id"], "course_name": feed["course_name"], **counts, "error": None})
+
+            # AI-classify any newly inserted items
+            new_items = counts.pop("new_items", [])
+            if new_items:
+                _classify_and_save(new_items, feed["course_name"])
+
+            pending = _count_pending_review(user_id, feed["id"])
+            results.append({
+                "feed_id": feed["id"],
+                "course_name": feed["course_name"],
+                **counts,
+                "pending_review": pending,
+                "error": None,
+            })
         except Exception as e:
             logger.error(f"POST /ls-feeds/sync - feed {feed['id']} failed: {e}")
             results.append({"feed_id": feed["id"], "course_name": feed["course_name"], "error": str(e)})
 
     return {"synced": len(feeds), "results": results}
+
+
+@app.get("/ls-feeds/{feed_id}/pending-review")
+def get_pending_review(feed_id: str, user_id: str = Depends(get_current_user)):
+    """Return items for this feed that have been AI-classified but not yet confirmed by the user."""
+    feed_resp = supabase_service.table("ls_ical_feeds").select("course_name").eq(
+        "id", feed_id
+    ).eq("user_id", user_id).limit(1).execute()
+    if not feed_resp.data:
+        raise HTTPException(status_code=404, detail="Feed not found")
+    course_name = feed_resp.data[0]["course_name"]
+
+    resp = supabase_service.table("assignments").select(
+        "id, title, content_type, due_date, assignment_type"
+    ).eq("user_id", user_id).eq("course_name", course_name).eq(
+        "classification_confirmed", False
+    ).order("due_date").execute()
+
+    return {"items": resp.data or [], "course_name": course_name}
+
+
+class ClassificationConfirm(BaseModel):
+    items: list[dict]  # [{id: str, content_type: "graded"|"course_content"}, ...]
+
+
+@app.post("/ls-feeds/{feed_id}/confirm-classifications")
+def confirm_classifications(
+    feed_id: str,
+    body: ClassificationConfirm,
+    user_id: str = Depends(get_current_user),
+):
+    """Save user-confirmed content_type for each item and mark classification_confirmed=true."""
+    if not body.items:
+        return {"confirmed": 0}
+
+    # Verify feed belongs to user
+    feed_resp = supabase_service.table("ls_ical_feeds").select("id").eq(
+        "id", feed_id
+    ).eq("user_id", user_id).limit(1).execute()
+    if not feed_resp.data:
+        raise HTTPException(status_code=404, detail="Feed not found")
+
+    confirmed = 0
+    for item in body.items:
+        aid = item.get("id")
+        ct = item.get("content_type", "graded")
+        if not aid or ct not in ("graded", "course_content"):
+            continue
+        supabase_service.table("assignments").update({
+            "content_type": ct,
+            "classification_confirmed": True,
+        }).eq("id", aid).eq("user_id", user_id).execute()
+        confirmed += 1
+
+    logger.info(f"POST /ls-feeds/{feed_id}/confirm-classifications user={user_id[:8]} - {confirmed} confirmed")
+    return {"confirmed": confirmed}
 
 
 @app.patch("/ls-feeds/{feed_id}")

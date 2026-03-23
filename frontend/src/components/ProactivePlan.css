@@ -236,3 +236,32 @@
   color: #6366f1;
 }
 .proactive-regenerate:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Small icon-only action buttons (export, regenerate) */
+.proactive-icon-group {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+  align-items: center;
+}
+
+.proactive-icon-btn {
+  background: none;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: #818cf8;
+  border-radius: 8px;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.proactive-icon-btn svg { width: 15px; height: 15px; }
+.proactive-icon-btn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.07);
+  color: #6366f1;
+}
+.proactive-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }

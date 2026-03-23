@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { authFetch, API_BASE } from '../lib/api'
+import { downloadTimeBlocksICS } from '../utils/calendar'
 import './ProactivePlan.css'
 
 const DISMISS_KEY = 'campus-ai-plan-dismissed'
@@ -53,6 +54,7 @@ export default function ProactivePlan({
 }) {
   const [blocks, setBlocks] = useState(null)   // null = loading, [] = empty
   const [generating, setGenerating] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(DISMISS_KEY) === new Date().toDateString() }
     catch { return false }
@@ -106,12 +108,37 @@ export default function ProactivePlan({
         addToast('AI plan generated!', 'success')
         await fetchTodayBlocks()
       } else {
-        addToast('Failed to generate plan. Make sure GROQ_API_KEY is set.', 'error')
+        let detail = 'Failed to generate plan.'
+        try { const d = await res.json(); detail = d.detail || detail } catch { /**/ }
+        addToast(detail, 'error')
       }
     } catch {
       addToast('Failed to generate plan.', 'error')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handleExport = async () => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const res = await authFetch(`${API_BASE}/schedule/week`)
+      if (res.ok) {
+        const data = await res.json()
+        const allBlocks = data.blocks || []
+        if (allBlocks.length === 0) {
+          addToast?.('No scheduled blocks to export.', 'error')
+          return
+        }
+        downloadTimeBlocksICS(allBlocks, data.week_start)
+      } else {
+        addToast?.('Could not load schedule for export.', 'error')
+      }
+    } catch {
+      addToast?.('Export failed. Try again.', 'error')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -229,14 +256,35 @@ export default function ProactivePlan({
             {hasBlocks ? 'Chat to adjust' : 'Ask AI instead'}
           </button>
           {hasBlocks && (
-            <button
-              className="proactive-regenerate"
-              onClick={handleGenerate}
-              disabled={generating}
-              title="Regenerate plan"
-            >
-              ↺
-            </button>
+            <div className="proactive-icon-group">
+              <button
+                className="proactive-icon-btn"
+                onClick={handleExport}
+                disabled={exporting}
+                title="Export week to calendar (.ics)"
+                aria-label="Export week to calendar"
+              >
+                {exporting ? (
+                  <span className="proactive-spinner" />
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                )}
+              </button>
+              <button
+                className="proactive-icon-btn"
+                onClick={handleGenerate}
+                disabled={generating}
+                title="Regenerate plan"
+                aria-label="Regenerate plan"
+              >
+                ↺
+              </button>
+            </div>
           )}
         </div>
       )}
