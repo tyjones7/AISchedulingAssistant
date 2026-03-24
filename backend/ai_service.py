@@ -388,8 +388,13 @@ def classify_ls_events(items: list[dict], course_name: str) -> dict[str, str]:
 You are classifying calendar events from a BYU university course called "{course_name}".
 
 Classify each event as exactly one of:
-- "graded": something the student must complete and submit (assignment, quiz, exam, reflection, project, peer review, survey, lab report)
-- "course_content": class session topic, professor's reading guide, study instructions, in-class activity not submitted externally, announcement, or anything that is NOT a student deliverable
+- "graded": something the student must PRODUCE and SUBMIT — assignment, quiz, exam, paper, project, reflection, peer review, survey, lab report, homework, case study writeup
+- "course_content": anything NOT a student deliverable — class session topics, lecture outlines, weekly agendas, chapter/reading titles, module overviews, in-class activities, announcements, discussion that is just class time, prep materials, review sessions
+
+When in doubt, prefer "course_content". Only mark "graded" if it is clearly something that must be turned in.
+
+course_content examples: "Week 4 Topics", "Chapter 5 Overview", "Module 2 Intro", "Pre-class Reading", "Lecture 10: Supply Chain", "In-Class Discussion", "Session 21", "Review Day"
+graded examples: "HW 3", "Quiz 2", "Midterm Exam", "Case Study Due", "Peer Review", "Final Project", "Reading Response 4"
 
 Events:
 {numbered}

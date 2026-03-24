@@ -11,7 +11,7 @@ Not available: points, submission status, direct links
 import os
 import logging
 import re
-from datetime import datetime, timezone, date as _date
+from datetime import datetime, timezone, timedelta, date as _date
 from urllib.parse import urlparse, parse_qs
 from zoneinfo import ZoneInfo
 
@@ -154,6 +154,74 @@ def fetch_and_parse(url: str, course_name: str) -> list[dict]:
 
     logger.info(f"iCal: {course_name} → {len(assignments)} events from {url}")
     return assignments
+
+
+def fetch_class_sessions(url: str, course_name: str) -> list[dict]:
+    """Fetch class session events (not assignments) from an LS iCal feed.
+
+    Returns events with actual start/end datetimes in Mountain Time — these are
+    the recurring class meetings that LS includes in the feed alongside assignments.
+    Date-only events (no time info) are skipped since they're not useful for the calendar.
+    """
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"iCal class session fetch failed for {url}: {e}")
+        return []
+
+    cal = Calendar.from_ical(resp.content)
+    sessions = []
+
+    for component in cal.walk('VEVENT'):
+        summary = component.get('SUMMARY')
+        dtstart_prop = component.get('DTSTART')
+        dtend_prop = component.get('DTEND')
+
+        if not summary or dtstart_prop is None:
+            continue
+
+        title = re.sub(r'\s+', ' ', str(summary)).strip()
+
+        # Only keep events that match the non-assignment patterns (class sessions, etc.)
+        if not _NON_ASSIGNMENT_RE.search(title):
+            continue
+
+        # Skip NO CLASS / cancelled sessions
+        if re.match(r'^\*+', title):
+            continue
+
+        dtstart_val = dtstart_prop.dt if hasattr(dtstart_prop, 'dt') else dtstart_prop
+
+        # Skip date-only events — no actual time info, useless for the calendar grid
+        if isinstance(dtstart_val, _date) and not isinstance(dtstart_val, datetime):
+            continue
+
+        if dtstart_val.tzinfo is None:
+            dtstart_val = dtstart_val.replace(tzinfo=MOUNTAIN)
+        start_dt = dtstart_val.astimezone(MOUNTAIN)
+
+        if dtend_prop:
+            dtend_val = dtend_prop.dt if hasattr(dtend_prop, 'dt') else dtend_prop
+            if isinstance(dtend_val, _date) and not isinstance(dtend_val, datetime):
+                end_dt = start_dt + timedelta(hours=1)
+            else:
+                if dtend_val.tzinfo is None:
+                    dtend_val = dtend_val.replace(tzinfo=MOUNTAIN)
+                end_dt = dtend_val.astimezone(MOUNTAIN)
+        else:
+            end_dt = start_dt + timedelta(hours=1)
+
+        sessions.append({
+            "title": title,
+            "course_name": course_name,
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+            "date": start_dt.date().isoformat(),
+        })
+
+    logger.info(f"iCal class sessions: {course_name} → {len(sessions)} sessions from {url}")
+    return sessions
 
 
 def update_database(assignments: list[dict], supabase_client=None, user_id: str = None, feed_url: str = None) -> dict:

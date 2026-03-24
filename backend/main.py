@@ -126,6 +126,11 @@ class LSICalFeedCreate(BaseModel):
     course_name: str
 
 
+class ExternalCalendarCreate(BaseModel):
+    url: str
+    label: str = "My Calendar"
+
+
 class LSICalFeedUpdate(BaseModel):
     url: Optional[str] = None
     course_name: Optional[str] = None
@@ -872,14 +877,55 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
     except Exception:
         time_blocks = []
 
+    # Fetch external calendar events so AI knows about outside commitments
+    _ext_busy_lines = []
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        import requests as _req_ext
+        from icalendar import Calendar as _Cal_ext
+        from datetime import timedelta as _td_ext, date as _date_ext
+        _mt_ext = _ZI("America/Denver")
+        _today_dt = datetime.now(_mt_ext)
+        _week_end_dt = _today_dt + timedelta(days=7)
+        _ext_feeds = supabase_service.table("external_calendars").select("url, label").eq("user_id", user_id).execute()
+        for _feed in (_ext_feeds.data or []):
+            try:
+                _resp = _req_ext.get(_feed["url"], timeout=8)
+                _resp.raise_for_status()
+                _cal = _Cal_ext.from_ical(_resp.content)
+                for _comp in _cal.walk("VEVENT"):
+                    _dtstart = _comp.get("DTSTART")
+                    _summary = _comp.get("SUMMARY")
+                    if not _dtstart or not _summary:
+                        continue
+                    _val = _dtstart.dt if hasattr(_dtstart, "dt") else _dtstart
+                    _is_date = isinstance(_val, _date_ext) and not isinstance(_val, datetime)
+                    if _is_date:
+                        _sdt = datetime(_val.year, _val.month, _val.day, 0, 0, tzinfo=_mt_ext)
+                    else:
+                        _sdt = _val.astimezone(_mt_ext) if _val.tzinfo else _val.replace(tzinfo=_mt_ext)
+                    if _sdt < _today_dt or _sdt >= _week_end_dt:
+                        continue
+                    _ext_busy_lines.append(
+                        f"- {_sdt.strftime('%a %b %-d %-I:%M%p')}: {str(_summary).strip()} ({_feed['label']})"
+                    )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"POST /ai/chat: external calendar fetch failed: {e}")
+
     # Compute exact free time windows (same data used by auto-generate)
     try:
         from schedule_service import compute_free_slots, format_free_slots_for_ai
         free_slots_by_day = compute_free_slots(prefs, days=7)
-        free_slots_text = format_free_slots_for_ai(free_slots_by_day)
+        _base_slots_text = format_free_slots_for_ai(free_slots_by_day)
+        if _ext_busy_lines:
+            free_slots_text = _base_slots_text + "\n\nExternal calendar commitments this week:\n" + "\n".join(_ext_busy_lines)
+        else:
+            free_slots_text = _base_slots_text
     except Exception as e:
         logger.warning(f"POST /ai/chat: free slot computation failed: {e}")
-        free_slots_text = None
+        free_slots_text = ("\n\nExternal calendar commitments this week:\n" + "\n".join(_ext_busy_lines)) if _ext_busy_lines else None
 
     # Tally completed block minutes per assignment so AI knows remaining work
     try:
@@ -1295,6 +1341,165 @@ def delete_ls_feed(feed_id: str, user_id: str = Depends(get_current_user)):
     ).eq("user_id", user_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Feed not found")
+
+
+@app.get("/ls-feeds/class-events")
+def get_ls_class_events(
+    week_start: str = Query(None),
+    user_id: str = Depends(get_current_user),
+):
+    """Return class session events from all LS iCal feeds for the given week.
+
+    These are the actual class meeting times embedded in LS iCal feeds —
+    filtered *out* during assignment import but useful for the calendar grid.
+    """
+    from zoneinfo import ZoneInfo as _ZI
+    from datetime import timedelta as _td
+
+    _mt = _ZI("America/Denver")
+    if week_start:
+        try:
+            _ws = datetime.strptime(week_start, "%Y-%m-%d").replace(tzinfo=_mt)
+        except ValueError:
+            _ws = datetime.now(_mt)
+    else:
+        _ws = datetime.now(_mt)
+    _ws = _ws.replace(hour=0, minute=0, second=0, microsecond=0)
+    _we = _ws + _td(days=7)
+    _ws_str = _ws.date().isoformat()
+    _we_str = _we.date().isoformat()
+
+    feeds = supabase_service.table("ls_ical_feeds").select("url, course_name").eq("user_id", user_id).execute()
+    events = []
+    for feed in (feeds.data or []):
+        try:
+            from ical_client import fetch_class_sessions
+            sessions = fetch_class_sessions(feed["url"], feed["course_name"])
+            for s in sessions:
+                if _ws_str <= s["date"] < _we_str:
+                    events.append(s)
+        except Exception as e:
+            logger.warning(f"GET /ls-feeds/class-events feed={feed.get('course_name')}: {e}")
+
+    return {"events": events}
+
+
+# ============== EXTERNAL CALENDAR ROUTES ==============
+
+@app.get("/external-calendars")
+def list_external_calendars(user_id: str = Depends(get_current_user)):
+    """List all saved external calendar feeds for the current user."""
+    result = supabase_service.table("external_calendars").select("*").eq("user_id", user_id).execute()
+    return {"calendars": result.data or []}
+
+
+@app.post("/external-calendars", status_code=201)
+def add_external_calendar(body: ExternalCalendarCreate, user_id: str = Depends(get_current_user)):
+    """Save a new external iCal URL (e.g. Google Calendar secret address)."""
+    row = {"url": body.url.strip(), "label": body.label.strip() or "My Calendar", "user_id": user_id}
+    result = supabase_service.table("external_calendars").insert(row).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to save calendar")
+    return {"calendar": result.data[0]}
+
+
+@app.delete("/external-calendars/{cal_id}", status_code=204)
+def delete_external_calendar(cal_id: str, user_id: str = Depends(get_current_user)):
+    """Delete an external calendar feed."""
+    supabase_service.table("external_calendars").delete().eq("id", cal_id).eq("user_id", user_id).execute()
+
+
+@app.get("/external-calendars/events")
+def get_external_calendar_events(
+    week_start: str = Query(None),
+    user_id: str = Depends(get_current_user),
+):
+    """Fetch and return events from all saved external calendars for a given week.
+
+    Returns events as [{title, start, end, label, all_day}] in Mountain Time.
+    If week_start is not provided, defaults to current week.
+    """
+    from datetime import date, timedelta as td
+    from zoneinfo import ZoneInfo
+    import requests as _requests
+    from icalendar import Calendar as _Calendar
+
+    MOUNTAIN = ZoneInfo("America/Denver")
+
+    # Parse week range
+    if week_start:
+        try:
+            ws = datetime.strptime(week_start, "%Y-%m-%d").replace(tzinfo=MOUNTAIN)
+        except ValueError:
+            ws = datetime.now(MOUNTAIN)
+    else:
+        ws = datetime.now(MOUNTAIN)
+        ws = ws - td(days=(ws.weekday()))  # Monday
+    ws = ws.replace(hour=0, minute=0, second=0, microsecond=0)
+    we = ws + td(days=7)
+
+    # Load all feeds
+    feeds_result = supabase_service.table("external_calendars").select("*").eq("user_id", user_id).execute()
+    feeds = feeds_result.data or []
+
+    events = []
+    for feed in feeds:
+        url = feed.get("url", "")
+        label = feed.get("label", "External")
+        try:
+            resp = _requests.get(url, timeout=10)
+            resp.raise_for_status()
+            cal = _Calendar.from_ical(resp.content)
+            for component in cal.walk("VEVENT"):
+                dtstart_prop = component.get("DTSTART")
+                dtend_prop = component.get("DTEND")
+                summary = component.get("SUMMARY")
+                if not dtstart_prop or not summary:
+                    continue
+
+                dtstart_val = dtstart_prop.dt if hasattr(dtstart_prop, "dt") else dtstart_prop
+                dtend_val = dtend_prop.dt if (dtend_prop and hasattr(dtend_prop, "dt")) else None
+
+                # Normalize to datetime
+                from datetime import date as _date_type
+                all_day = isinstance(dtstart_val, _date_type) and not isinstance(dtstart_val, datetime)
+
+                if all_day:
+                    start_dt = datetime(dtstart_val.year, dtstart_val.month, dtstart_val.day,
+                                        0, 0, 0, tzinfo=MOUNTAIN)
+                    if dtend_val and isinstance(dtend_val, _date_type):
+                        end_dt = datetime(dtend_val.year, dtend_val.month, dtend_val.day,
+                                          23, 59, 59, tzinfo=MOUNTAIN)
+                    else:
+                        end_dt = start_dt.replace(hour=23, minute=59, second=59)
+                else:
+                    if dtstart_val.tzinfo is None:
+                        dtstart_val = dtstart_val.replace(tzinfo=MOUNTAIN)
+                    start_dt = dtstart_val.astimezone(MOUNTAIN)
+                    if dtend_val:
+                        if dtend_val.tzinfo is None:
+                            dtend_val = dtend_val.replace(tzinfo=MOUNTAIN)
+                        end_dt = dtend_val.astimezone(MOUNTAIN)
+                    else:
+                        end_dt = start_dt + td(hours=1)
+
+                # Filter to the requested week
+                if end_dt < ws or start_dt >= we:
+                    continue
+
+                events.append({
+                    "title": str(summary).strip(),
+                    "start": start_dt.isoformat(),
+                    "end": end_dt.isoformat(),
+                    "calendar_label": label,
+                    "calendar_id": feed["id"],
+                    "all_day": all_day,
+                })
+        except Exception as e:
+            logger.warning(f"External calendar fetch failed for {url[:60]}: {e}")
+            continue
+
+    return {"events": events}
 
 
 # ============== PUSH NOTIFICATION ROUTES ==============

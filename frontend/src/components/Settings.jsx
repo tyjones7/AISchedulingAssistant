@@ -42,6 +42,14 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [prefSaved, setPrefSaved] = useState(false)
   const [prefError, setPrefError] = useState(null)
 
+  // External calendars (Google Calendar, etc.)
+  const [extCalendars, setExtCalendars] = useState([])
+  const [extCalUrl, setExtCalUrl] = useState('')
+  const [extCalLabel, setExtCalLabel] = useState('')
+  const [extCalAdding, setExtCalAdding] = useState(false)
+  const [extCalError, setExtCalError] = useState(null)
+  const [showExtCalAdd, setShowExtCalAdd] = useState(false)
+
   // iCal feeds
   const [icalFeeds, setIcalFeeds] = useState([])
   const [icalUrl, setIcalUrl] = useState('')
@@ -87,6 +95,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   })
   const [newBlock, setNewBlock] = useState({ days: [], label: '', start: '08:00', end: '09:00' })
   const [showAddBlock, setShowAddBlock] = useState(false)
+  const [courseNames, setCourseNames] = useState([])
 
   // Load user info on mount
   useEffect(() => {
@@ -113,6 +122,22 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.weekly_schedule !== undefined) setSchedule(preferences.weekly_schedule || [])
     if (preferences.student_context !== undefined) setStudentContext(preferences.student_context || '')
   }, [preferences])
+
+  // Load external calendars and course names on mount
+  useEffect(() => {
+    authFetch(`${API_BASE}/external-calendars`).then(async (res) => {
+      if (!res.ok) return
+      const data = await res.json()
+      setExtCalendars(data.calendars || [])
+    }).catch(() => {})
+
+    authFetch(`${API_BASE}/assignments`).then(async (res) => {
+      if (!res.ok) return
+      const data = await res.json()
+      const names = [...new Set((data.assignments || []).map(a => a.course_name).filter(Boolean))].sort()
+      setCourseNames(names)
+    }).catch(() => {})
+  }, [])
 
   // Load iCal feeds on mount, then fetch pending review counts for each
   useEffect(() => {
@@ -215,6 +240,37 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     } finally {
       setIcalSyncing(false)
     }
+  }
+
+  const handleExtCalAdd = async () => {
+    const url = extCalUrl.trim()
+    const label = extCalLabel.trim() || 'My Calendar'
+    if (!url) return
+    setExtCalAdding(true)
+    setExtCalError(null)
+    try {
+      const res = await authFetch(`${API_BASE}/external-calendars`, {
+        method: 'POST',
+        body: JSON.stringify({ url, label }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Save failed')
+      setExtCalendars(prev => [...prev, data.calendar])
+      setExtCalUrl('')
+      setExtCalLabel('')
+      setShowExtCalAdd(false)
+    } catch (err) {
+      setExtCalError(err.message || 'Could not save calendar')
+    } finally {
+      setExtCalAdding(false)
+    }
+  }
+
+  const handleExtCalDelete = async (calId) => {
+    try {
+      await authFetch(`${API_BASE}/external-calendars/${calId}`, { method: 'DELETE' })
+      setExtCalendars(prev => prev.filter(c => c.id !== calId))
+    } catch { /* ignore */ }
   }
 
   const openReview = async (feedId, courseName) => {
@@ -612,6 +668,79 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
             </p>
           </section>
 
+          {/* Google Calendar / External iCal Section */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">Google Calendar</h3>
+            <p className="settings-section-desc">
+              Connect your Google Calendar so your existing commitments show up in the weekly view and the AI schedules around them.
+            </p>
+
+            {extCalendars.length > 0 && (
+              <div className="ical-feeds-list">
+                {extCalendars.map(cal => (
+                  <div key={cal.id} className="ical-feed-row">
+                    <div className="ical-feed-info">
+                      <span className="ical-feed-course">{cal.label}</span>
+                    </div>
+                    <div className="ical-feed-actions">
+                      <button
+                        className="schedule-block-remove"
+                        onClick={() => handleExtCalDelete(cal.id)}
+                        aria-label="Remove calendar"
+                      >×</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {showExtCalAdd ? (
+              <div className="ical-add-form">
+                <input
+                  type="text"
+                  className="settings-token-input"
+                  placeholder="Calendar name (e.g. My Google Calendar)"
+                  value={extCalLabel}
+                  onChange={(e) => setExtCalLabel(e.target.value)}
+                  autoFocus
+                />
+                <input
+                  type="url"
+                  className="settings-token-input"
+                  placeholder="Secret iCal address (https://calendar.google.com/calendar/ical/...)"
+                  value={extCalUrl}
+                  onChange={(e) => setExtCalUrl(e.target.value)}
+                />
+                {extCalError && <p className="settings-error">{extCalError}</p>}
+                <div className="schedule-add-actions">
+                  <button
+                    type="button"
+                    className="settings-secondary-btn"
+                    onClick={() => { setShowExtCalAdd(false); setExtCalUrl(''); setExtCalLabel(''); setExtCalError(null) }}
+                  >Cancel</button>
+                  <button
+                    type="button"
+                    className="settings-primary-btn"
+                    onClick={handleExtCalAdd}
+                    disabled={extCalAdding || !extCalUrl.trim()}
+                  >{extCalAdding ? 'Saving...' : 'Save'}</button>
+                </div>
+              </div>
+            ) : (
+              <button className="settings-secondary-btn" onClick={() => { setShowExtCalAdd(true); setExtCalError(null) }}>
+                + Connect calendar
+              </button>
+            )}
+
+            <p className="settings-hint">
+              How to get your Google Calendar iCal URL:
+              <br />1. Go to <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener noreferrer">Google Calendar Settings</a>
+              <br />2. Click a calendar name in the left sidebar under &quot;Settings for my calendars&quot;
+              <br />3. Scroll to <strong>Integrate calendar</strong>
+              <br />4. Copy the <strong>Secret address in iCal format</strong> (starts with https://calendar.google.com/calendar/ical/...)
+            </p>
+          </section>
+
           {/* Preferences Section */}
           <section className="settings-section">
             <h3 className="settings-section-title">Study Preferences</h3>
@@ -741,8 +870,11 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
 
           {/* Weekly Schedule Section */}
           <section className="settings-section">
-            <h3 className="settings-section-title">Weekly Schedule</h3>
-            <p className="settings-section-desc">Add your recurring class times and commitments so the AI schedules study time around them.</p>
+            <h3 className="settings-section-title">Class Schedule</h3>
+            <p className="settings-section-desc">
+              Add your recurring class times so they show up on the weekly calendar and the AI schedules around them.
+              {schedule.length === 0 && <strong> This is required for class blocks to appear on the calendar.</strong>}
+            </p>
 
             {schedule.length > 0 && (
               <div className="schedule-blocks">
@@ -776,18 +908,42 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                     >{d}</button>
                   ))}
                 </div>
-                <input
-                  type="text"
-                  className="schedule-label-input"
-                  placeholder="Label (e.g. STRAT 490R)"
-                  value={newBlock.label}
-                  onChange={(e) => setNewBlock(b => ({ ...b, label: e.target.value }))}
-                />
+                {courseNames.length > 0 ? (
+                  <select
+                    className="schedule-label-input"
+                    value={newBlock.label}
+                    onChange={(e) => setNewBlock(b => ({ ...b, label: e.target.value }))}
+                  >
+                    <option value="">Select a course…</option>
+                    {courseNames.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value="__custom__">Other…</option>
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    className="schedule-label-input"
+                    placeholder="Class name (e.g. STRAT 490R)"
+                    value={newBlock.label}
+                    onChange={(e) => setNewBlock(b => ({ ...b, label: e.target.value }))}
+                  />
+                )}
+                {newBlock.label === '__custom__' && (
+                  <input
+                    type="text"
+                    className="schedule-label-input"
+                    placeholder="Enter class name"
+                    autoFocus
+                    onChange={(e) => setNewBlock(b => ({ ...b, label: e.target.value === '' ? '__custom__' : e.target.value }))}
+                  />
+                )}
                 <div className="schedule-time-row">
-                  <input type="time" className="schedule-time-input" value={newBlock.start}
+                  <span>From</span>
+                  <input type="time" step="900" className="schedule-time-input" value={newBlock.start}
                     onChange={(e) => setNewBlock(b => ({ ...b, start: e.target.value }))} />
                   <span>to</span>
-                  <input type="time" className="schedule-time-input" value={newBlock.end}
+                  <input type="time" step="900" className="schedule-time-input" value={newBlock.end}
                     onChange={(e) => setNewBlock(b => ({ ...b, end: e.target.value }))} />
                 </div>
                 <div className="schedule-add-actions">
@@ -806,9 +962,21 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                 </div>
               </div>
             ) : (
-              <button className="settings-secondary-btn" onClick={() => setShowAddBlock(true)}>
-                + Add time block
-              </button>
+              <div className="ical-actions">
+                <button className="settings-secondary-btn" onClick={() => setShowAddBlock(true)}>
+                  + Add class time
+                </button>
+                {schedule.length > 0 && (
+                  <button className="settings-action-btn" onClick={handleSavePrefs} disabled={prefSaving}>
+                    {prefSaving ? 'Saving...' : 'Save schedule'}
+                  </button>
+                )}
+              </div>
+            )}
+            {schedule.length > 0 && !showAddBlock && (
+              <p className="settings-hint" style={{ marginTop: '8px' }}>
+                Hit <strong>Save schedule</strong> above (or <strong>Save Preferences</strong> below) to apply changes to the calendar.
+              </p>
             )}
           </section>
 

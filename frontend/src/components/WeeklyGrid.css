@@ -83,6 +83,13 @@
   cursor: default;
 }
 
+.wg-btn--export {
+  background: #fff;
+  color: #6b7280;
+  border: 1.5px solid #d1d5db;
+}
+.wg-btn--export:hover:not(:disabled) { background: #f9fafb; border-color: #9ca3af; }
+
 /* Scrollable area */
 .wg-scroll {
   overflow-x: auto;
@@ -207,14 +214,19 @@
 }
 
 .wg-block--class {
-  background: #e5e7eb;
-  border-left: 3px solid #9ca3af;
   cursor: default;
+}
+
+.wg-block--external {
+  background: #f3f4f6;
+  border-left: 3px solid #9ca3af;
+  color: #6b7280;
+  cursor: default;
+  font-style: italic;
 }
 
 .wg-block--task {
   cursor: grab;
-  color: #fff;
 }
 
 .wg-block--task:active { cursor: grabbing; }
@@ -235,11 +247,9 @@
   line-height: 1.2;
 }
 
-.wg-block--class .wg-block-title { color: #4b5563; }
-
 .wg-block-course {
   font-size: 0.62rem;
-  opacity: 0.85;
+  opacity: 0.75;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -249,9 +259,9 @@
   position: absolute;
   top: 2px;
   right: 3px;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.15);
   border: none;
-  color: #fff;
+  color: inherit;
   border-radius: 3px;
   width: 14px;
   height: 14px;

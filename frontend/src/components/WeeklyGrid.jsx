@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { authFetch, API_BASE } from '../lib/api'
+import { downloadTimeBlocksICS } from '../utils/calendar'
 import './WeeklyGrid.css'
 
 const GRID_START_HOUR = 7   // 7 am
@@ -8,15 +9,24 @@ const GRID_START_MIN  = GRID_START_HOUR * 60
 const SLOT_HEIGHT     = 48  // px per 30-min slot
 const SLOT_MIN        = 30
 
-const COURSE_COLORS = [
-  '#6366f1', '#0ea5e9', '#10b981', '#f59e0b',
-  '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6',
+// Each course gets a dark shade (class time) and light shade (study/homework)
+const PALETTE = [
+  { dark: '#6366f1', light: '#eef2ff', text: '#3730a3' },
+  { dark: '#0ea5e9', light: '#e0f2fe', text: '#0369a1' },
+  { dark: '#10b981', light: '#d1fae5', text: '#065f46' },
+  { dark: '#f59e0b', light: '#fef3c7', text: '#92400e' },
+  { dark: '#ef4444', light: '#fee2e2', text: '#991b1b' },
+  { dark: '#8b5cf6', light: '#ede9fe', text: '#5b21b6' },
+  { dark: '#ec4899', light: '#fce7f3', text: '#9d174d' },
+  { dark: '#14b8a6', light: '#ccfbf1', text: '#134e4a' },
+  { dark: '#f97316', light: '#ffedd5', text: '#9a3412' },
+  { dark: '#84cc16', light: '#f7fee7', text: '#3f6212' },
 ]
 
 function getCourseColor(name) {
-  if (!name) return COURSE_COLORS[0]
+  if (!name) return PALETTE[0]
   const h = [...name].reduce((a, c) => a + c.charCodeAt(0), 0)
-  return COURSE_COLORS[h % COURSE_COLORS.length]
+  return PALETTE[h % PALETTE.length]
 }
 
 function getMtDateStr(d) {
@@ -84,12 +94,15 @@ const GRID_HEIGHT = TOTAL_SLOTS * SLOT_HEIGHT
 export default function WeeklyGrid({ preferences, addToast }) {
   const [blocks, setBlocks] = useState([])
   const [overbooked, setOverbooked] = useState([])
+  const [externalEvents, setExternalEvents] = useState([])
+  const [lsClassEvents, setLsClassEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [approved, setApproved] = useState(false)
   const [approving, setApproving] = useState(false)
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()))
   const [draggedBlockId, setDraggedBlockId] = useState(null)
+  const [exporting, setExporting] = useState(false)
 
   const weeklySchedule = preferences?.weekly_schedule || []
 
@@ -99,12 +112,24 @@ export default function WeeklyGrid({ preferences, addToast }) {
 
   const fetchWeek = async () => {
     setLoading(true)
+    const ws = getMtDateStr(weekStart)
     try {
-      const ws = getMtDateStr(weekStart)
-      const res = await authFetch(`${API_BASE}/schedule/week?week_start=${ws}`)
-      if (res.ok) {
-        const data = await res.json()
+      const [schedRes, extRes, lsRes] = await Promise.all([
+        authFetch(`${API_BASE}/schedule/week?week_start=${ws}`),
+        authFetch(`${API_BASE}/external-calendars/events?week_start=${ws}`),
+        authFetch(`${API_BASE}/ls-feeds/class-events?week_start=${ws}`),
+      ])
+      if (schedRes.ok) {
+        const data = await schedRes.json()
         setBlocks(data.blocks || [])
+      }
+      if (extRes.ok) {
+        const extData = await extRes.json()
+        setExternalEvents(extData.events || [])
+      }
+      if (lsRes.ok) {
+        const lsData = await lsRes.json()
+        setLsClassEvents(lsData.events || [])
       }
     } catch (e) {
       console.error(e)
@@ -213,11 +238,20 @@ export default function WeeklyGrid({ preferences, addToast }) {
     const dayAbbrev = new Date(dayDateStr + 'T12:00:00').toLocaleDateString('en-US', {
       timeZone: 'America/Denver', weekday: 'short',
     })
-    return (weeklySchedule || []).filter(b => (b.days || []).includes(dayAbbrev))
+    // Support both {day: "Mon"} (singular, from Settings) and {days: ["Mon"]} (array, legacy)
+    return (weeklySchedule || []).filter(b =>
+      b.day === dayAbbrev || (Array.isArray(b.days) && b.days.includes(dayAbbrev))
+    )
   }
 
   const timeBlocksForDay = (dayDateStr) =>
     blocks.filter(b => b.date === dayDateStr)
+
+  const externalEventsForDay = (dayDateStr) =>
+    externalEvents.filter(ev => getMtDateStr(new Date(ev.start)) === dayDateStr)
+
+  const lsClassEventsForDay = (dayDateStr) =>
+    lsClassEvents.filter(ev => ev.date === dayDateStr)
 
   const prevWeek = () => {
     const d = new Date(weekStart)
@@ -266,13 +300,44 @@ export default function WeeklyGrid({ preferences, addToast }) {
             {generating ? 'Generating…' : 'Generate Plan'}
           </button>
           {blocks.length > 0 && (
-            <button
-              className={`wg-btn ${approved ? 'wg-btn--approved' : 'wg-btn--approve'}`}
-              onClick={handleApprove}
-              disabled={approving || approved}
-            >
-              {approved ? '✓ Plan Approved' : approving ? 'Approving…' : 'Approve Plan'}
-            </button>
+            <>
+              <button
+                className={`wg-btn ${approved ? 'wg-btn--approved' : 'wg-btn--approve'}`}
+                onClick={handleApprove}
+                disabled={approving || approved}
+              >
+                {approved ? '✓ Plan Approved' : approving ? 'Approving…' : 'Approve Plan'}
+              </button>
+              <button
+                className="wg-btn wg-btn--export"
+                onClick={async () => {
+                  if (exporting) return
+                  setExporting(true)
+                  try {
+                    const ws = getMtDateStr(weekStart)
+                    const res = await authFetch(`${API_BASE}/schedule/week?week_start=${ws}`)
+                    if (res.ok) {
+                      const data = await res.json()
+                      if ((data.blocks || []).length === 0) {
+                        addToast('No blocks to export', 'error')
+                      } else {
+                        downloadTimeBlocksICS(data.blocks, data.week_start)
+                      }
+                    } else {
+                      addToast('Export failed', 'error')
+                    }
+                  } catch {
+                    addToast('Export failed', 'error')
+                  } finally {
+                    setExporting(false)
+                  }
+                }}
+                disabled={exporting}
+                title="Export week to .ics (Google/Apple Calendar)"
+              >
+                {exporting ? 'Exporting…' : '↓ Export .ics'}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -305,6 +370,8 @@ export default function WeeklyGrid({ preferences, addToast }) {
               const isToday = dayDateStr === todayStr
               const clsBlocks = classBlocksForDay(dayDateStr)
               const dayBlocks = timeBlocksForDay(dayDateStr)
+              const extEvents = externalEventsForDay(dayDateStr)
+              const lsClasses = lsClassEventsForDay(dayDateStr)
 
               return (
                 <div key={dayDateStr} className={`wg-day-col ${isToday ? 'is-today' : ''}`}>
@@ -335,13 +402,59 @@ export default function WeeklyGrid({ preferences, addToast }) {
                     ))}
 
                     {/* Class blocks (read-only) */}
-                    {clsBlocks.map((cb, ci) => (
+                    {clsBlocks.map((cb, ci) => {
+                      const clsColor = getCourseColor(cb.label)
+                      return (
+                        <div
+                          key={ci}
+                          className="wg-block wg-block--class"
+                          style={{
+                            top: classTop(cb.start),
+                            height: classHeight(cb.start, cb.end),
+                            background: clsColor.dark,
+                            borderLeft: `3px solid ${clsColor.dark}`,
+                            color: '#fff',
+                          }}
+                        >
+                          <span className="wg-block-title">{cb.label || 'Class'}</span>
+                        </div>
+                      )
+                    })}
+
+                    {/* LS class session blocks (auto from iCal, color-coded) */}
+                    {lsClasses.map((ev, ei) => {
+                      const lsColor = getCourseColor(ev.course_name)
+                      return (
+                        <div
+                          key={`ls-${ei}`}
+                          className="wg-block wg-block--class"
+                          style={{
+                            top: blockTop(ev.start),
+                            height: blockHeight(ev.start, ev.end),
+                            background: lsColor.dark,
+                            borderLeft: `3px solid ${lsColor.dark}`,
+                            color: '#fff',
+                          }}
+                          title={`${ev.course_name}\n${formatTime(ev.start)} – ${formatTime(ev.end)}`}
+                        >
+                          <span className="wg-block-title">{ev.course_name}</span>
+                        </div>
+                      )
+                    })}
+
+                    {/* External calendar events (read-only, gray busy blocks) */}
+                    {extEvents.map((ev, ei) => (
                       <div
-                        key={ci}
-                        className="wg-block wg-block--class"
-                        style={{ top: classTop(cb.start), height: classHeight(cb.start, cb.end) }}
+                        key={`ext-${ei}`}
+                        className="wg-block wg-block--external"
+                        style={{
+                          top: blockTop(ev.start),
+                          height: blockHeight(ev.start, ev.end),
+                        }}
+                        title={`${ev.title}\n${ev.calendar_label}`}
                       >
-                        <span className="wg-block-title">{cb.label || 'Class'}</span>
+                        <span className="wg-block-title">{ev.title}</span>
+                        <span className="wg-block-course">{ev.calendar_label}</span>
                       </div>
                     ))}
 
@@ -351,6 +464,7 @@ export default function WeeklyGrid({ preferences, addToast }) {
                       const color = getCourseColor(asgn.course_name)
                       const isDragging = draggedBlockId === block.id
                       const isCompleted = block.status === 'completed'
+                      const label = block.label || asgn.title || 'Study'
                       return (
                         <div
                           key={block.id}
@@ -358,15 +472,17 @@ export default function WeeklyGrid({ preferences, addToast }) {
                           style={{
                             top: blockTop(block.start_time),
                             height: blockHeight(block.start_time, block.end_time),
-                            background: color,
+                            background: color.light,
+                            borderLeft: `3px solid ${color.dark}`,
+                            color: color.text,
                             opacity: isDragging ? 0.4 : 1,
                           }}
                           draggable={!isCompleted}
                           onDragStart={e => handleDragStart(e, block.id)}
                           onDragEnd={() => setDraggedBlockId(null)}
-                          title={`${asgn.title}\n${formatTime(block.start_time)} – ${formatTime(block.end_time)}`}
+                          title={`${label}\n${formatTime(block.start_time)} – ${formatTime(block.end_time)}`}
                         >
-                          <span className="wg-block-title">{asgn.title || 'Study'}</span>
+                          <span className="wg-block-title">{label}</span>
                           <span className="wg-block-course">{asgn.course_name}</span>
                           <button
                             className="wg-block-remove"

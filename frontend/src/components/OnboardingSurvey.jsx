@@ -7,7 +7,8 @@ import './OnboardingSurvey.css'
 //   0  Where are your classes? (classSource)
 //   1  Canvas token connect     (skipped when classSource === 'ls')
 //   2  Learning Suite iCal      (skipped when classSource === 'canvas')
-//  3–7  Survey questions (5 questions, same as before)
+//   3  Class schedule           (always shown — enter recurring class times)
+//  4–8  Survey questions (5 questions)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SURVEY_STEPS = [
@@ -76,11 +77,12 @@ function getNextStep(current, classSource) {
     return 1                              // canvas / both / not_sure → Canvas first
   }
   if (current === 1) {
-    if (classSource === 'canvas') return 3  // skip LS
+    if (classSource === 'canvas') return 3  // skip LS → class schedule
     return 2                                 // both / not_sure → LS step
   }
-  if (current === 2) return 3
-  return current + 1  // survey steps 3–7
+  if (current === 2) return 3   // LS → class schedule
+  if (current === 3) return 4   // class schedule → survey
+  return current + 1  // survey steps 4–8
 }
 
 function getPrevStep(current, classSource) {
@@ -88,12 +90,13 @@ function getPrevStep(current, classSource) {
   if (current === 1) return 0
   if (current === 2) {
     if (classSource === 'ls') return 0
-    return 1  // both / not_sure came from Canvas step
+    return 1
   }
   if (current === 3) {
     if (classSource === 'canvas') return 1
-    return 2  // ls / both / not_sure came from LS step
+    return 2
   }
+  if (current === 4) return 3   // first survey question → class schedule
   return current - 1
 }
 
@@ -112,6 +115,11 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
   const [canvasError, setCanvasError] = useState(null)
   const [canvasConnected, setCanvasConnected] = useState(!!isCanvasConnected)
   const [canvasUser, setCanvasUser] = useState(null)
+
+  // Class schedule state (step 3)
+  const [classSchedule, setClassSchedule] = useState([])
+  const [newClassBlock, setNewClassBlock] = useState({ days: [], label: '', start: '08:00', end: '09:00' })
+  const [showAddClass, setShowAddClass] = useState(false)
 
   // LS iCal state
   const [lsFeeds, setLsFeeds] = useState([])   // feeds saved to backend during onboarding
@@ -508,9 +516,145 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
     )
   }
 
-  // ── Steps 3–7: Survey questions ───────────────────────────────────────────
+  // ── Step 3: Class schedule ────────────────────────────────────────────────
 
-  const surveyIndex = step - 3
+  if (step === 3) {
+    const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    const courseSuggestions = lsFeeds.map(f => f.course_name).filter(Boolean)
+
+    const addBlock = () => {
+      if (newClassBlock.days.length === 0) return
+      const entries = newClassBlock.days.map(d => ({
+        day: d,
+        label: newClassBlock.label,
+        start: newClassBlock.start,
+        end: newClassBlock.end,
+      }))
+      setClassSchedule(s => [...s, ...entries])
+      setNewClassBlock({ days: [], label: '', start: '08:00', end: '09:00' })
+      setShowAddClass(false)
+    }
+
+    return (
+      <div className="survey-backdrop">
+        <div className="survey-card survey-ls-card">
+          <div className="survey-canvas-header">
+            <div className="survey-step-badge">Class Schedule</div>
+            <h2 className="survey-canvas-title">When are your classes?</h2>
+            <p className="survey-canvas-sub">
+              Add your recurring class times so they appear on your calendar and the AI plans around them. You can skip and add them later in Settings.
+            </p>
+          </div>
+
+          <div className="survey-ls-body">
+            {classSchedule.length > 0 && (
+              <div className="survey-ls-feeds">
+                {classSchedule.map((block, i) => (
+                  <div key={i} className="survey-ls-feed-row">
+                    <span className="survey-ls-feed-name" style={{ fontWeight: 600 }}>{block.day}</span>
+                    <span className="survey-ls-feed-name">{block.start}–{block.end}</span>
+                    {block.label && <span className="survey-ls-feed-name" style={{ color: '#6366f1' }}>{block.label}</span>}
+                    <button
+                      className="survey-ls-feed-remove"
+                      onClick={() => setClassSchedule(s => s.filter((_, idx) => idx !== i))}
+                      aria-label="Remove"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {showAddClass ? (
+              <div className="survey-ls-form">
+                <div className="schedule-days-row" style={{ marginBottom: '0.5rem' }}>
+                  {DAYS.map(d => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`schedule-day-btn ${newClassBlock.days.includes(d) ? 'active' : ''}`}
+                      onClick={() => setNewClassBlock(b => ({
+                        ...b,
+                        days: b.days.includes(d) ? b.days.filter(x => x !== d) : [...b.days, d],
+                      }))}
+                    >{d}</button>
+                  ))}
+                </div>
+                {courseSuggestions.length > 0 ? (
+                  <select
+                    className="survey-token-input"
+                    value={newClassBlock.label}
+                    onChange={e => setNewClassBlock(b => ({ ...b, label: e.target.value }))}
+                  >
+                    <option value="">Select a course…</option>
+                    {courseSuggestions.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value="other">Other…</option>
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    className="survey-token-input"
+                    placeholder="Class name (e.g. STRAT 490R)"
+                    value={newClassBlock.label}
+                    onChange={e => setNewClassBlock(b => ({ ...b, label: e.target.value }))}
+                  />
+                )}
+                {newClassBlock.label === 'other' && (
+                  <input
+                    type="text"
+                    className="survey-token-input"
+                    placeholder="Enter class name"
+                    autoFocus
+                    onChange={e => setNewClassBlock(b => ({ ...b, label: e.target.value }))}
+                  />
+                )}
+                <div className="schedule-time-row">
+                  <span>From</span>
+                  <input type="time" step="900" className="schedule-time-input" value={newClassBlock.start}
+                    onChange={e => setNewClassBlock(b => ({ ...b, start: e.target.value }))} />
+                  <span>to</span>
+                  <input type="time" step="900" className="schedule-time-input" value={newClassBlock.end}
+                    onChange={e => setNewClassBlock(b => ({ ...b, end: e.target.value }))} />
+                </div>
+                <div className="schedule-add-actions">
+                  <button type="button" className="survey-back" onClick={() => { setShowAddClass(false); setNewClassBlock({ days: [], label: '', start: '08:00', end: '09:00' }) }}>Cancel</button>
+                  <button
+                    type="button"
+                    className="survey-next"
+                    disabled={newClassBlock.days.length === 0}
+                    onClick={addBlock}
+                  >Add</button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="survey-next"
+                style={{ alignSelf: 'flex-start', background: 'none', border: '1.5px solid #6366f1', color: '#6366f1' }}
+                onClick={() => setShowAddClass(true)}
+              >
+                + Add a class
+              </button>
+            )}
+          </div>
+
+          <div className="survey-footer">
+            <button className="survey-back" onClick={goBack}>Back</button>
+            <button className="survey-skip" onClick={goNext}>
+              {classSchedule.length > 0 ? 'Done' : 'Skip for now'}
+            </button>
+            {classSchedule.length > 0 && (
+              <button className="survey-next" onClick={goNext}>Continue</button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Steps 4–8: Survey questions ───────────────────────────────────────────
+
+  const surveyIndex = step - 4
   const current = SURVEY_STEPS[surveyIndex]
   const selected = answers[current.id]
   const isLast = surveyIndex === SURVEY_STEPS.length - 1
@@ -526,9 +670,11 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
     setSaving(true)
     setError(null)
     try {
+      const payload = { ...answers }
+      if (classSchedule.length > 0) payload.weekly_schedule = classSchedule
       const res = await authFetch(`${API_BASE}/preferences`, {
         method: 'POST',
-        body: JSON.stringify(answers),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error('Failed to save')
       const prefs = await res.json()
@@ -574,7 +720,17 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
 
         <div className="survey-footer">
           <button className="survey-back" onClick={() => setStep((s) => getPrevStep(s, classSource))}>Back</button>
-          <button className="survey-skip" onClick={() => onComplete(null, canvasConnected, lsFeeds.length > 0)}>
+          <button className="survey-skip" onClick={async () => {
+            if (classSchedule.length > 0) {
+              try {
+                await authFetch(`${API_BASE}/preferences`, {
+                  method: 'POST',
+                  body: JSON.stringify({ weekly_schedule: classSchedule }),
+                })
+              } catch { /* ignore */ }
+            }
+            onComplete(null, canvasConnected, lsFeeds.length > 0)
+          }}>
             Skip for now
           </button>
           <button

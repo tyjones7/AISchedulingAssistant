@@ -93,7 +93,10 @@ def compute_free_slots(prefs: dict, days: int = 7) -> dict[str, list[tuple[datet
 
         busy = []
         for block in weekly_schedule:
-            if weekday_str in (block.get("days") or []):
+            # Support both {day: "Mon"} (singular, from Settings) and {days: ["Mon",...]} (legacy)
+            day_val = block.get("day") or ""
+            days_val = block.get("days") or []
+            if weekday_str == day_val or weekday_str in days_val:
                 try:
                     bs_h, bs_m = _parse_hm(block.get("start", "00:00"))
                     be_h, be_m = _parse_hm(block.get("end", "00:00"))
