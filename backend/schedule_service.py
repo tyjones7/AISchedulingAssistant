@@ -216,6 +216,21 @@ def generate_schedule_ai(user_id: str, supabase_client, days: int = 7) -> dict:
             logger.warning(f"schedule_ai: could not parse block times {start_str}–{end_str}: {ex}")
             continue
 
+        # Hard rule: never schedule a block after the assignment's due date
+        task = id_to_task.get(aid, {})
+        due_str = task.get("due_date")
+        if due_str:
+            try:
+                due_dt = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
+                if start_dt >= due_dt.astimezone(MOUNTAIN):
+                    logger.warning(
+                        f"schedule_ai: dropping block for {task.get('title')!r} on {date_str} "
+                        f"— starts at or after due date {due_dt.date()}"
+                    )
+                    continue
+            except Exception:
+                pass
+
         # Verify block doesn't land in a busy slot
         day_free = free_slots_by_day.get(date_str, [])
         fits = any(fs <= start_dt and end_dt <= fe for fs, fe in day_free)

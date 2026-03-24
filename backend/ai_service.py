@@ -274,11 +274,12 @@ Scheduling rules:
 1. Most urgent first (soonest deadline, highest point value)
 2. Schedule complex tasks (essays, problem sets, exam prep) during the student's best focus hours
 3. Respect the student's preferred session length — split larger tasks across multiple blocks
-4. Leave buffer before deadlines — do NOT schedule work the same day as the deadline if avoidable
+4. Leave buffer before deadlines — NEVER schedule a block ON the due date or AFTER it. Aim to finish all work at least 1 day before the deadline (more if the student's advance_days preference says so).
 5. If work_style is "batch", prefer fewer longer sessions; if "spread_out", prefer shorter sessions on more days
-6. Do NOT schedule past a task's due date
+6. CRITICAL: Do NOT schedule any block on or after a task's due date under any circumstances
 7. Minimum block size: 20 minutes. Do not create micro-sessions.
 8. Use realistic time estimates — if no estimate is provided, make a reasonable one based on task type
+9. Start work on assignments with distant due dates now — don't procrastinate; distribute work evenly across available days
 
 Output a JSON object with two keys:
   "blocks": array of scheduled blocks

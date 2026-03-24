@@ -147,6 +147,7 @@ class UserPreferences(BaseModel):
     work_start: Optional[str] = "08:00"
     work_end: Optional[str] = "22:00"
     student_context: Optional[str] = ""
+    course_colors: Optional[dict] = None
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -159,6 +160,7 @@ class UserPreferencesUpdate(BaseModel):
     work_start: Optional[str] = None
     work_end: Optional[str] = None
     student_context: Optional[str] = None
+    course_colors: Optional[dict] = None
 
 
 load_dotenv()
@@ -877,13 +879,14 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
     except Exception:
         time_blocks = []
 
-    # Fetch external calendar events so AI knows about outside commitments
+    # Fetch external calendar events so AI knows about outside commitments (with RRULE expansion)
     _ext_busy_lines = []
     try:
         from zoneinfo import ZoneInfo as _ZI
         import requests as _req_ext
         from icalendar import Calendar as _Cal_ext
         from datetime import timedelta as _td_ext, date as _date_ext
+        import recurring_ical_events as _rie
         _mt_ext = _ZI("America/Denver")
         _today_dt = datetime.now(_mt_ext)
         _week_end_dt = _today_dt + timedelta(days=7)
@@ -893,7 +896,7 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
                 _resp = _req_ext.get(_feed["url"], timeout=8)
                 _resp.raise_for_status()
                 _cal = _Cal_ext.from_ical(_resp.content)
-                for _comp in _cal.walk("VEVENT"):
+                for _comp in _rie.of(_cal).between(_today_dt, _week_end_dt):
                     _dtstart = _comp.get("DTSTART")
                     _summary = _comp.get("SUMMARY")
                     if not _dtstart or not _summary:
@@ -904,8 +907,6 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
                         _sdt = datetime(_val.year, _val.month, _val.day, 0, 0, tzinfo=_mt_ext)
                     else:
                         _sdt = _val.astimezone(_mt_ext) if _val.tzinfo else _val.replace(tzinfo=_mt_ext)
-                    if _sdt < _today_dt or _sdt >= _week_end_dt:
-                        continue
                     _ext_busy_lines.append(
                         f"- {_sdt.strftime('%a %b %-d %-I:%M%p')}: {str(_summary).strip()} ({_feed['label']})"
                     )
@@ -1417,12 +1418,14 @@ def get_external_calendar_events(
     """Fetch and return events from all saved external calendars for a given week.
 
     Returns events as [{title, start, end, label, all_day}] in Mountain Time.
+    Uses recurring-ical-events to expand RRULE recurring events (e.g. Google Calendar).
     If week_start is not provided, defaults to current week.
     """
-    from datetime import date, timedelta as td
+    from datetime import date as _date_type, timedelta as td
     from zoneinfo import ZoneInfo
     import requests as _requests
     from icalendar import Calendar as _Calendar
+    import recurring_ical_events
 
     MOUNTAIN = ZoneInfo("America/Denver")
 
@@ -1450,7 +1453,11 @@ def get_external_calendar_events(
             resp = _requests.get(url, timeout=10)
             resp.raise_for_status()
             cal = _Calendar.from_ical(resp.content)
-            for component in cal.walk("VEVENT"):
+
+            # Use recurring_ical_events to expand all RRULE/recurring events for the week
+            expanded = recurring_ical_events.of(cal).between(ws, we)
+
+            for component in expanded:
                 dtstart_prop = component.get("DTSTART")
                 dtend_prop = component.get("DTEND")
                 summary = component.get("SUMMARY")
@@ -1460,8 +1467,6 @@ def get_external_calendar_events(
                 dtstart_val = dtstart_prop.dt if hasattr(dtstart_prop, "dt") else dtstart_prop
                 dtend_val = dtend_prop.dt if (dtend_prop and hasattr(dtend_prop, "dt")) else None
 
-                # Normalize to datetime
-                from datetime import date as _date_type
                 all_day = isinstance(dtstart_val, _date_type) and not isinstance(dtstart_val, datetime)
 
                 if all_day:
@@ -1482,10 +1487,6 @@ def get_external_calendar_events(
                         end_dt = dtend_val.astimezone(MOUNTAIN)
                     else:
                         end_dt = start_dt + td(hours=1)
-
-                # Filter to the requested week
-                if end_dt < ws or start_dt >= we:
-                    continue
 
                 events.append({
                     "title": str(summary).strip(),

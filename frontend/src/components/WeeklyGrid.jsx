@@ -10,7 +10,7 @@ const SLOT_HEIGHT     = 48  // px per 30-min slot
 const SLOT_MIN        = 30
 
 // Each course gets a dark shade (class time) and light shade (study/homework)
-const PALETTE = [
+export const PALETTE = [
   { dark: '#6366f1', light: '#eef2ff', text: '#3730a3' },
   { dark: '#0ea5e9', light: '#e0f2fe', text: '#0369a1' },
   { dark: '#10b981', light: '#d1fae5', text: '#065f46' },
@@ -23,10 +23,33 @@ const PALETTE = [
   { dark: '#84cc16', light: '#f7fee7', text: '#3f6212' },
 ]
 
-function getCourseColor(name) {
-  if (!name) return PALETTE[0]
-  const h = [...name].reduce((a, c) => a + c.charCodeAt(0), 0)
-  return PALETTE[h % PALETTE.length]
+/**
+ * Build a color map assigning each course a unique PALETTE entry.
+ * User overrides (courseColorPrefs: {name → paletteIndex}) take priority.
+ * Remaining courses are assigned sequentially in sorted order.
+ */
+export function buildCourseColorMap(courseNames, courseColorPrefs = {}) {
+  const sorted = [...new Set(courseNames.filter(Boolean))].sort()
+  const colorMap = {}
+  // Apply user overrides first
+  const usedIndices = new Set()
+  for (const name of sorted) {
+    const idx = courseColorPrefs[name]
+    if (idx !== undefined) {
+      colorMap[name] = PALETTE[Number(idx) % PALETTE.length]
+      usedIndices.add(Number(idx) % PALETTE.length)
+    }
+  }
+  // Fill remaining with unused palette slots
+  let nextIdx = 0
+  for (const name of sorted) {
+    if (colorMap[name]) continue
+    while (usedIndices.has(nextIdx % PALETTE.length)) nextIdx++
+    colorMap[name] = PALETTE[nextIdx % PALETTE.length]
+    usedIndices.add(nextIdx % PALETTE.length)
+    nextIdx++
+  }
+  return colorMap
 }
 
 function getMtDateStr(d) {
@@ -105,6 +128,19 @@ export default function WeeklyGrid({ preferences, addToast }) {
   const [exporting, setExporting] = useState(false)
 
   const weeklySchedule = preferences?.weekly_schedule || []
+  const courseColorPrefs = preferences?.course_colors || {}
+
+  // Build a color map with guaranteed unique colors per course
+  const courseColorMap = buildCourseColorMap(
+    [
+      ...blocks.map(b => b.assignments?.course_name),
+      ...weeklySchedule.map(b => b.label),
+      ...lsClassEvents.map(e => e.course_name),
+    ],
+    courseColorPrefs
+  )
+
+  const getCourseColor = (name) => courseColorMap[name] || PALETTE[0]
 
   useEffect(() => {
     fetchWeek()

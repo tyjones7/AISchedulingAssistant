@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { authFetch, API_BASE } from '../lib/api'
 import { registerPushNotifications, unregisterPushNotifications, isPushSupported, getPushPermission } from '../utils/pushNotifications'
+import { PALETTE, buildCourseColorMap } from './WeeklyGrid'
 import './Settings.css'
 
 const STUDY_TIME_OPTIONS = [
@@ -82,6 +83,11 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [contextSaving, setContextSaving] = useState(false)
   const [contextSaved, setContextSaved] = useState(false)
 
+  // Course colors
+  const [courseColorPrefs, setCourseColorPrefs] = useState(() => preferences?.course_colors || {})
+  const [colorSaving, setColorSaving] = useState(false)
+  const [colorSaved, setColorSaved] = useState(false)
+
   // Push notifications
   const [pushSupported] = useState(() => isPushSupported())
   const [pushPermission, setPushPermission] = useState(() => getPushPermission())
@@ -121,6 +127,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.involvement_level) setInvolvementLevel(preferences.involvement_level)
     if (preferences.weekly_schedule !== undefined) setSchedule(preferences.weekly_schedule || [])
     if (preferences.student_context !== undefined) setStudentContext(preferences.student_context || '')
+    if (preferences.course_colors !== undefined) setCourseColorPrefs(preferences.course_colors || {})
   }, [preferences])
 
   // Load external calendars and course names on mount
@@ -437,6 +444,25 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       setPushError('Something went wrong. Please try again.')
     } finally {
       setPushLoading(false)
+    }
+  }
+
+  const handleSaveColors = async () => {
+    setColorSaving(true)
+    try {
+      const res = await authFetch(`${API_BASE}/preferences`, {
+        method: 'POST',
+        body: JSON.stringify({ course_colors: courseColorPrefs }),
+      })
+      if (!res.ok) throw new Error('Failed to save')
+      const updated = await res.json()
+      onPreferencesChange?.(updated)
+      setColorSaved(true)
+      setTimeout(() => setColorSaved(false), 2500)
+    } catch {
+      // silent — colors are non-critical
+    } finally {
+      setColorSaving(false)
     }
   }
 
@@ -979,6 +1005,60 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
               </p>
             )}
           </section>
+
+          {/* Course Colors Section */}
+          {courseNames.length > 0 && (
+            <section className="settings-section">
+              <h3 className="settings-section-title">Course Colors</h3>
+              <p className="settings-section-desc">
+                Pick a color for each course. These colors appear on your weekly calendar for class blocks and study sessions.
+              </p>
+              <div className="course-colors-list">
+                {(() => {
+                  const colorMap = buildCourseColorMap(courseNames, courseColorPrefs)
+                  return courseNames.map(name => {
+                    const currentIdx = courseColorPrefs[name] !== undefined
+                      ? Number(courseColorPrefs[name]) % PALETTE.length
+                      : PALETTE.indexOf(colorMap[name])
+                    const currentColor = PALETTE[currentIdx < 0 ? 0 : currentIdx]
+                    return (
+                      <div key={name} className="course-color-row">
+                        <span className="course-color-name">{name}</span>
+                        <div className="course-color-swatches">
+                          {PALETTE.map((p, idx) => (
+                            <button
+                              key={idx}
+                              className={`color-swatch ${currentIdx === idx ? 'is-selected' : ''}`}
+                              style={{ background: p.dark }}
+                              title={`Color ${idx + 1}`}
+                              onClick={() => setCourseColorPrefs(prev => ({ ...prev, [name]: idx }))}
+                              aria-label={`Color option ${idx + 1}`}
+                            />
+                          ))}
+                        </div>
+                        <div
+                          className="course-color-preview"
+                          style={{ background: currentColor.light, borderLeft: `3px solid ${currentColor.dark}`, color: currentColor.text }}
+                        >
+                          {name}
+                        </div>
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
+              <div className="settings-save-row">
+                {colorSaved && <span className="settings-saved-msg">Saved!</span>}
+                <button
+                  className="settings-save-btn"
+                  onClick={handleSaveColors}
+                  disabled={colorSaving}
+                >
+                  {colorSaving ? 'Saving…' : 'Save colors'}
+                </button>
+              </div>
+            </section>
+          )}
 
           {/* AI Profile Section */}
           <section className="settings-section">
