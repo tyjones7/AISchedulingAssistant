@@ -102,11 +102,16 @@ function formatTime(isoStr) {
 }
 
 function getWeekStart(d) {
-  const date = new Date(d)
-  const day = date.getDay()
-  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1))
-  date.setHours(0, 0, 0, 0)
-  return date
+  // Compute week start entirely in Mountain Time so any browser timezone works.
+  // 1. Find day-of-week in MT
+  const dowStr = d.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short' })
+  const dowIndex = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(dowStr)
+  const daysBack = dowIndex === 0 ? 6 : dowIndex - 1
+  // 2. Get today's MT date string, parse it, subtract to Monday
+  const mtStr = getMtDateStr(d)
+  const [y, mo, dy] = mtStr.split('-').map(Number)
+  // 3. Store as noon UTC — safe from DST/timezone shifts in any browser locale
+  return new Date(Date.UTC(y, mo - 1, dy - daysBack, 12, 0, 0))
 }
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -291,24 +296,24 @@ export default function WeeklyGrid({ preferences, addToast }) {
 
   const prevWeek = () => {
     const d = new Date(weekStart)
-    d.setDate(d.getDate() - 7)
+    d.setUTCDate(d.getUTCDate() - 7)
     setWeekStart(d)
   }
 
   const nextWeek = () => {
     const d = new Date(weekStart)
-    d.setDate(d.getDate() + 7)
+    d.setUTCDate(d.getUTCDate() + 7)
     setWeekStart(d)
   }
 
   const weekDates = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart)
-    d.setDate(d.getDate() + i)
+    d.setUTCDate(d.getUTCDate() + i)
     return d
   })
 
   const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 6)
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + 6)
   const weekStartStr = getMtDateStr(weekStart)
   const weekEndStr = getMtDateStr(weekEnd)
   const weekLabel = `${MONTH_NAMES[parseInt(weekStartStr.slice(5,7),10)-1]} ${parseInt(weekStartStr.slice(-2),10)} – ${MONTH_NAMES[parseInt(weekEndStr.slice(5,7),10)-1]} ${parseInt(weekEndStr.slice(-2),10)}`
