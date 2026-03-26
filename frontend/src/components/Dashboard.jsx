@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useAssignments } from '../hooks/useAssignments'
 import AssignmentCard from './AssignmentCard'
 import AssignmentDetail from './AssignmentDetail'
 import SyncButton from './SyncButton'
@@ -13,14 +14,6 @@ import WeeklyGrid from './WeeklyGrid'
 import { ToastContainer } from './Toast'
 import { authFetch, API_BASE } from '../lib/api'
 import './Dashboard.css'
-
-const STATUS_LABELS = {
-  newly_assigned: 'New',
-  not_started: 'Not Started',
-  in_progress: 'In Progress',
-  submitted: 'Submitted',
-  unavailable: 'Unavailable',
-}
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -49,12 +42,23 @@ const TIMELINE_SECTIONS = [
 
 
 function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, onPreferencesChange }) {
-  const [assignments, setAssignments] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [updatingIds, setUpdatingIds] = useState(new Set())
   const [toasts, setToasts] = useState([])
-  const [lastSyncTime, setLastSyncTime] = useState(null)
+
+  const addToast = useCallback((message, type = 'info') => {
+    const id = Date.now() + Math.random()
+    setToasts((prev) => [...prev, { id, message, type }])
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500)
+  }, [])
+
+  const {
+    assignments, setAssignments,
+    loading, error,
+    updatingIds, exitingIds,
+    lastSyncTime, setLastSyncTime,
+    fetchAssignments, fetchLastSync,
+    handleStatusChange, handleMarkStarted, handleMarkDone,
+  } = useAssignments(addToast)
+
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState(null)
 
@@ -91,11 +95,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   const openChatRef = useRef(null)
   const autoBriefingFired = useRef(false)
 
-
-  const addToast = useCallback((message, type = 'success') => {
-    const id = Date.now()
-    setToasts((prev) => [...prev, { id, message, type }])
-  }, [])
 
   const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id))
@@ -162,36 +161,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     setSyncStatus({ status: 'pending', message: 'Starting sync...', total_courses: 0, current_course: 0 })
   }, [])
 
-  const fetchAssignments = async () => {
-    try {
-      const response = await authFetch(`${API_BASE}/assignments?exclude_past_submitted=true`)
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-      const data = await response.json()
-      setAssignments(data.assignments || [])
-      setError(null)
-    } catch (err) {
-      console.error('[Dashboard] Failed to fetch assignments:', err)
-      setError(`Failed to load assignments. Make sure the backend is running on ${API_BASE}`)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchLastSync = async () => {
-    try {
-      const response = await authFetch(`${API_BASE}/sync/last`)
-      if (!response.ok) return
-      const data = await response.json()
-      if (data.last_sync?.last_sync_at) {
-        setLastSyncTime(data.last_sync.last_sync_at)
-      }
-    } catch (err) {
-      console.error('[Dashboard] Error fetching last sync:', err)
-    }
-  }
-
   const handleGenerateAI = useCallback(async () => {
     if (isGeneratingAI) return
     setIsGeneratingAI(true)
@@ -228,61 +197,6 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       addToast(`Sync complete: ${added} new, ${updated} updated from ${courses} courses`)
     }
   }, [addToast])
-
-  const handleStatusChange = useCallback(async (assignmentId, newStatus) => {
-    const originalAssignment = assignments.find((a) => a.id === assignmentId)
-    if (!originalAssignment) return
-    const originalStatus = originalAssignment.status
-
-    setAssignments((prev) =>
-      prev.map((a) =>
-        a.id === assignmentId ? { ...a, status: newStatus } : a
-      )
-    )
-
-    setUpdatingIds((prev) => new Set([...prev, assignmentId]))
-
-    try {
-      const response = await authFetch(
-        `${API_BASE}/assignments/${assignmentId}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ status: newStatus }),
-        }
-      )
-
-      if (!response.ok) throw new Error('Failed to update status')
-
-      const data = await response.json()
-      setAssignments((prev) =>
-        prev.map((a) => (a.id === assignmentId ? data.assignment : a))
-      )
-
-      addToast(`Moved to "${STATUS_LABELS[newStatus]}"`, 'success')
-    } catch (err) {
-      console.error('Failed to update assignment:', err)
-      setAssignments((prev) =>
-        prev.map((a) =>
-          a.id === assignmentId ? { ...a, status: originalStatus } : a
-        )
-      )
-      addToast('Failed to update status. Please try again.', 'error')
-    } finally {
-      setUpdatingIds((prev) => {
-        const next = new Set(prev)
-        next.delete(assignmentId)
-        return next
-      })
-    }
-  }, [assignments, addToast])
-
-  const handleMarkStarted = useCallback((assignmentId) => {
-    handleStatusChange(assignmentId, 'in_progress')
-  }, [handleStatusChange])
-
-  const handleMarkDone = useCallback((assignmentId) => {
-    handleStatusChange(assignmentId, 'submitted')
-  }, [handleStatusChange])
 
   const handleOpenDetail = useCallback((assignment) => {
     setSelectedAssignment(assignment)
@@ -386,6 +300,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       onMarkDone={handleMarkDone}
       onOpenDetail={handleOpenDetail}
       isUpdating={updatingIds.has(assignment.id)}
+      isExiting={exitingIds.has(assignment.id)}
       compact
     />
   )

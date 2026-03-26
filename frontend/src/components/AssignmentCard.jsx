@@ -18,6 +18,7 @@ function AssignmentCard({
   onMarkDone,
   onOpenDetail,
   isUpdating,
+  isExiting = false,
   compact = false,
   suggestion = null,
 }) {
@@ -180,6 +181,7 @@ function AssignmentCard({
   const cardClasses = [
     'assignment-card',
     isUpdating && 'is-updating',
+    isExiting && 'is-exiting',
     compact && 'is-compact',
     onOpenDetail && 'is-clickable',
     `urgency-${urgency}`,

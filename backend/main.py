@@ -205,11 +205,18 @@ if not SUPABASE_URL or not SUPABASE_KEY:
         + ". Check your .env file or environment."
     )
 
-# Anon client — used only as a fallback if service key is not set
+if not SUPABASE_SERVICE_KEY:
+    raise RuntimeError(
+        "SUPABASE_SERVICE_KEY is required. "
+        "Without it the backend cannot bypass RLS and all DB writes will fail. "
+        "Add it to your .env file or environment."
+    )
+
+# Anon client — kept for reference; not used for any backend writes
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Service-role client — bypasses RLS; used for all backend DB operations
-supabase_service = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY) if SUPABASE_SERVICE_KEY else supabase
+supabase_service = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 app = FastAPI(title="AI Scheduling Assistant API", version="1.0.0")
 
@@ -560,6 +567,9 @@ def save_preferences(body: UserPreferencesUpdate, user_id: str = Depends(get_cur
     try:
         existing = supabase_service.table("user_preferences").select("id").eq("user_id", user_id).limit(1).execute()
         updates = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
+        # Enforce server-side length cap on free-text field
+        if "student_context" in updates and updates["student_context"]:
+            updates["student_context"] = updates["student_context"][:2000]
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         updates["user_id"] = user_id
 
