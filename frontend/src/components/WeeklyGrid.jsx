@@ -309,7 +309,9 @@ export default function WeeklyGrid({ preferences, addToast }) {
 
   const weekEnd = new Date(weekStart)
   weekEnd.setDate(weekEnd.getDate() + 6)
-  const weekLabel = `${MONTH_NAMES[weekStart.getMonth()]} ${weekStart.getDate()} – ${MONTH_NAMES[weekEnd.getMonth()]} ${weekEnd.getDate()}`
+  const weekStartStr = getMtDateStr(weekStart)
+  const weekEndStr = getMtDateStr(weekEnd)
+  const weekLabel = `${MONTH_NAMES[parseInt(weekStartStr.slice(5,7),10)-1]} ${parseInt(weekStartStr.slice(-2),10)} – ${MONTH_NAMES[parseInt(weekEndStr.slice(5,7),10)-1]} ${parseInt(weekEndStr.slice(-2),10)}`
 
   const timeLabels = Array.from({ length: GRID_END_HOUR - GRID_START_HOUR }, (_, i) => {
     const h = GRID_START_HOUR + i
@@ -414,7 +416,7 @@ export default function WeeklyGrid({ preferences, addToast }) {
                   <div className="wg-day-header">
                     <span className="wg-day-name">{DAY_LABELS[di]}</span>
                     <span className={`wg-day-num ${isToday ? 'is-today-num' : ''}`}>
-                      {dayDate.getDate()}
+                      {parseInt(dayDateStr.slice(-2), 10)}
                     </span>
                   </div>
 
