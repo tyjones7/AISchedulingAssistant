@@ -548,3 +548,17 @@
     height: 480px;
   }
 }
+
+@media (max-width: 480px) {
+  .ai-chat-panel {
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 85vh !important;
+    border-radius: 20px 20px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+  }
+}

@@ -307,15 +307,16 @@ class SyncService:
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Sync [{task_id[:8]}] failed: {error_msg}")
+            logger.error(f"Sync [{task_id[:8]}] failed: {error_msg}", exc_info=True)
 
             with self._task_lock:
                 task.status = SyncStatus.FAILED
-                task.error = error_msg
-                task.message = f"Sync failed: {error_msg}"
+                # Keep full error internal; expose only a safe message to the client
+                task.error = "Sync failed. Check your connection and try again."
+                task.message = "Sync failed. Check your connection and try again."
                 task.completed_at = datetime.now(timezone.utc)
 
-            # Save failed sync to metadata
+            # Save full error to metadata (server-side only)
             self._save_sync_metadata(task_id, user_id, "failed", None, error_msg)
 
         finally:

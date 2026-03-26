@@ -1,20 +1,15 @@
+import { useState, useEffect, useRef } from 'react'
 import './AssignmentCard.css'
 
 const STATUS_OPTIONS = [
-  { value: 'newly_assigned', label: 'New' },
-  { value: 'not_started', label: 'Not Started' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'submitted', label: 'Submitted' },
-  { value: 'unavailable', label: 'Unavailable' },
+  { value: 'newly_assigned',  label: 'New',         color: '#6366f1', bg: '#eef2ff' },
+  { value: 'not_started',     label: 'Not Started', color: '#64748b', bg: '#f1f5f9' },
+  { value: 'in_progress',     label: 'In Progress', color: '#d97706', bg: '#fef3c7' },
+  { value: 'submitted',       label: 'Submitted',   color: '#16a34a', bg: '#dcfce7' },
+  { value: 'unavailable',     label: 'Unavailable', color: '#9ca3af', bg: '#f3f4f6' },
 ]
 
-const STATUS_LABELS = {
-  newly_assigned: 'New',
-  not_started: 'Not Started',
-  in_progress: 'In Progress',
-  submitted: 'Submitted',
-  unavailable: 'Unavailable',
-}
+const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(o => [o.value, o]))
 
 function AssignmentCard({
   assignment,
@@ -27,6 +22,19 @@ function AssignmentCard({
   suggestion = null,
 }) {
   const tz = 'America/Denver'
+  const [statusOpen, setStatusOpen] = useState(false)
+  const dropdownRef = useRef(null)
+
+  useEffect(() => {
+    if (!statusOpen) return
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setStatusOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [statusOpen])
 
   const getMtDateStr = (d) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -121,9 +129,8 @@ function AssignmentCard({
   const urgency = assignment.due_date ? getUrgencyLevel(assignment.due_date) : 'later'
   const timeRemaining = assignment.due_date ? getTimeRemaining(assignment.due_date) : null
 
-  const handleStatusChange = (e) => {
-    e.stopPropagation()
-    const newStatus = e.target.value
+  const handleStatusChange = (newStatus) => {
+    setStatusOpen(false)
     if (newStatus !== assignment.status) {
       onStatusChange(assignment.id, newStatus)
     }
@@ -132,11 +139,12 @@ function AssignmentCard({
   const handleCardClick = (e) => {
     if (
       e.target.closest('.quick-action-btn') ||
-      e.target.closest('.status-select') ||
+      e.target.closest('.status-dropdown') ||
       e.target.closest('a')
     ) {
       return
     }
+    setStatusOpen(false)
     if (onOpenDetail) {
       onOpenDetail(assignment)
     }
@@ -331,20 +339,39 @@ function AssignmentCard({
         </div>
 
         <div className="status-controls">
-          <select
-            className="status-select"
-            value={assignment.status}
-            onChange={handleStatusChange}
-            disabled={isUpdating}
-            aria-label="Change status"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <div className="status-dropdown" ref={dropdownRef} onClick={e => e.stopPropagation()}>
+            <button
+              className="status-dropdown-btn"
+              style={{
+                color: STATUS_MAP[assignment.status]?.color,
+                background: STATUS_MAP[assignment.status]?.bg,
+              }}
+              onClick={() => !isUpdating && setStatusOpen(o => !o)}
+              disabled={isUpdating}
+              aria-haspopup="listbox"
+              aria-expanded={statusOpen}
+            >
+              {STATUS_MAP[assignment.status]?.label || assignment.status}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            {statusOpen && (
+              <ul className="status-dropdown-menu" role="listbox">
+                {STATUS_OPTIONS.map(opt => (
+                  <li
+                    key={opt.value}
+                    role="option"
+                    aria-selected={assignment.status === opt.value}
+                    className={`status-dropdown-option ${assignment.status === opt.value ? 'is-active' : ''}`}
+                    style={{ color: opt.color }}
+                    onClick={() => handleStatusChange(opt.value)}
+                  >
+                    <span className="status-dot" style={{ background: opt.color }} />
+                    {opt.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           {isUpdating && <span className="update-spinner" />}
         </div>
       </div>

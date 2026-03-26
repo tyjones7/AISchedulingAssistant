@@ -328,3 +328,39 @@
   color: #9ca3af;
   margin-top: 0.5rem;
 }
+
+/* ---- Mobile ---- */
+
+@media (max-width: 640px) {
+  .wg-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .wg-nav {
+    justify-content: space-between;
+  }
+
+  .wg-week-label {
+    min-width: 0;
+    flex: 1;
+    font-size: 0.82rem;
+  }
+
+  .wg-actions {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .wg-btn {
+    font-size: 0.78rem;
+    padding: 0.35rem 0.75rem;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .wg-scroll {
+    max-height: calc(100vh - 280px);
+  }
+}

@@ -983,3 +983,39 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ============================================
+   Mobile — Settings full-screen overlay
+   ============================================ */
+
+@media (max-width: 540px) {
+  .settings-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .settings-panel {
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-bottom: none;
+  }
+
+  .settings-section {
+    padding: var(--space-4);
+  }
+
+  .course-color-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .course-color-swatches {
+    flex-wrap: wrap;
+  }
+
+  .schedule-time-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}

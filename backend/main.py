@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
+from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client
@@ -17,6 +18,32 @@ import ai_service
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+_ALLOWED_ICAL_HOSTS = {
+    "learningsuite.byu.edu",
+    "calendar.google.com",
+    "outlook.live.com",
+    "outlook.office365.com",
+    "apple.com",
+    "icloud.com",
+}
+
+def _validate_ical_url(url: str) -> None:
+    """Raise HTTPException if the URL is not a safe, allowed iCal source."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL format")
+    if parsed.scheme != "https":
+        raise HTTPException(status_code=400, detail="iCal URL must use HTTPS")
+    host = parsed.hostname or ""
+    if not any(host == allowed or host.endswith("." + allowed) for allowed in _ALLOWED_ICAL_HOSTS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"URL host '{host}' is not an allowed iCal source. "
+                   "Supported: Learning Suite, Google Calendar, Outlook, iCloud."
+        )
 
 
 class StatusUpdate(BaseModel):
@@ -1188,6 +1215,7 @@ def add_ls_feed(body: LSICalFeedCreate, user_id: str = Depends(get_current_user)
     course_name = body.course_name.strip()
     if not url or not course_name:
         raise HTTPException(status_code=400, detail="url and course_name are required")
+    _validate_ical_url(url)
     result = supabase_service.table("ls_ical_feeds").insert({
         "user_id": user_id,
         "url": url,
@@ -1199,6 +1227,7 @@ def add_ls_feed(body: LSICalFeedCreate, user_id: str = Depends(get_current_user)
 @app.post("/ls-feeds/preview")
 def preview_ls_feed(body: LSICalFeedCreate):
     """Fetch and parse an iCal URL without saving or writing to DB. Returns first 5 events."""
+    _validate_ical_url(body.url.strip())
     from ical_client import fetch_and_parse
     try:
         assignments = fetch_and_parse(body.url.strip(), body.course_name.strip())
@@ -1318,6 +1347,7 @@ def update_ls_feed(feed_id: str, body: LSICalFeedUpdate, user_id: str = Depends(
         url = body.url.strip()
         if not url:
             raise HTTPException(status_code=400, detail="url cannot be empty")
+        _validate_ical_url(url)
         updates["url"] = url
     if body.course_name is not None:
         course_name = body.course_name.strip()
@@ -1397,6 +1427,7 @@ def list_external_calendars(user_id: str = Depends(get_current_user)):
 @app.post("/external-calendars", status_code=201)
 def add_external_calendar(body: ExternalCalendarCreate, user_id: str = Depends(get_current_user)):
     """Save a new external iCal URL (e.g. Google Calendar secret address)."""
+    _validate_ical_url(body.url.strip())
     row = {"url": body.url.strip(), "label": body.label.strip() or "My Calendar", "user_id": user_id}
     result = supabase_service.table("external_calendars").insert(row).execute()
     if not result.data:

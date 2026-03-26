@@ -948,3 +948,67 @@
   cursor: pointer;
   height: auto;
 }
+
+/* ============================================
+   Mobile — Full responsiveness (<480px)
+   ============================================ */
+
+@media (max-width: 480px) {
+  /* Header: stack brand + tabs vertically, scroll actions */
+  .dash-header-inner {
+    flex-wrap: wrap;
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .dash-brand {
+    flex: 1;
+  }
+
+  .dash-tabs {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .dash-tabs::-webkit-scrollbar { display: none; }
+
+  .dash-header-actions {
+    order: 2;
+    gap: var(--space-1);
+    flex-shrink: 0;
+  }
+
+  /* Hide text labels, keep icons on key buttons */
+  .ai-plan-btn span { display: none; }
+  .ai-plan-btn { padding: 0; width: 34px; justify-content: center; }
+
+  /* Content padding */
+  .dash-content {
+    padding: var(--space-3) var(--space-3) var(--space-8);
+  }
+
+  /* Timeline group headers */
+  .group-header {
+    padding: var(--space-3);
+    font-size: 0.72rem;
+  }
+
+  /* Welcome banner */
+  .welcome-banner {
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+  .welcome-banner h2 { font-size: 1rem; }
+}
+
+/* ============================================
+   Mobile — Settings panel full-screen
+   ============================================ */
+
+@media (max-width: 540px) {
+  .dash-content {
+    padding: var(--space-3) var(--space-3) var(--space-8);
+  }
+}
