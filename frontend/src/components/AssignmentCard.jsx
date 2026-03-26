@@ -221,7 +221,7 @@ function AssignmentCard({
           </span>
         )}
         <span className={`card-status status-${assignment.status}`}>
-          {STATUS_LABELS[assignment.status]}
+          {STATUS_MAP[assignment.status]?.label || assignment.status}
         </span>
         {assignment.estimated_minutes && (
           <span className="card-estimate">
