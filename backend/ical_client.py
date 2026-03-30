@@ -103,24 +103,31 @@ def _resolve_due_date(dtstart_val, dtend_val) -> tuple[str | None, bool]:
 
     if dtend_val is not None:
         if isinstance(dtend_val, datetime):
-            # DTEND has a real time component — this is a proper deadline
+            # DTEND has a real time component
             if dtend_val.tzinfo is None:
                 dtend_val = dtend_val.replace(tzinfo=MOUNTAIN)
             mt = dtend_val.astimezone(MOUNTAIN)
-            # If DTEND is midnight it's probably just a date-boundary marker, not a real time
+            # Midnight DTEND is just an iCal day-boundary marker, not a real deadline time
             if mt.hour == 0 and mt.minute == 0 and mt.second == 0:
                 dtend_date = mt.date()
-                if dtend_date == dtstart_date:
-                    return _to_eod_mountain(dtstart_val), True  # same-day, no real deadline
-                return _to_eod_mountain(dtstart_val), False
+                days_diff = (dtend_date - dtstart_date).days
+                if days_diff <= 1:
+                    # Same day or next-day midnight = all-day event marker, use DTSTART EOD
+                    return _to_eod_mountain(dtstart_val), True
+                # Midnight on a meaningfully later date — use that date's EOD
+                mt_eod = datetime(dtend_date.year, dtend_date.month, dtend_date.day,
+                                  23, 59, 59, tzinfo=MOUNTAIN)
+                return mt_eod.isoformat(), False
             return mt.isoformat(), False  # real due time (e.g. 8:00 AM Tuesday)
         else:
             # DTEND is date-only
             dtend_date = dtend_val
-            if dtend_date == dtstart_date:
-                # Same day as DTSTART → class topic / reading guide, not a deliverable
+            days_diff = (dtend_date - dtstart_date).days
+            if days_diff <= 1:
+                # iCal all-day event convention: DTEND = DTSTART + 1 day for single-day events.
+                # No real deadline — use DTSTART EOD and let AI decide if it's graded.
                 return _to_eod_mountain(dtstart_val), True
-            # Different day → treat as a deliverable with EOD on DTEND
+            # DTEND is meaningfully later → actual due date, use its EOD
             mt_eod = datetime(dtend_date.year, dtend_date.month, dtend_date.day,
                               23, 59, 59, tzinfo=MOUNTAIN)
             return mt_eod.isoformat(), False
