@@ -1190,6 +1190,19 @@ def _classify_and_save(new_items: list[dict], course_name: str) -> None:
         logger.error(f"_classify_and_save failed: {e}")
 
 
+def _estimate_and_save(new_items: list[dict]) -> None:
+    """Estimate time in minutes for newly inserted graded assignments and write to DB."""
+    try:
+        mapping = ai_service.estimate_assignment_minutes(new_items)
+        for assignment_id, mins in mapping.items():
+            supabase_service.table("assignments").update(
+                {"estimated_minutes": mins}
+            ).eq("id", assignment_id).execute()
+        logger.info(f"_estimate_and_save: estimated {len(mapping)}/{len(new_items)} items")
+    except Exception as e:
+        logger.error(f"_estimate_and_save failed: {e}")
+
+
 def _count_pending_review(user_id: str, feed_id: str) -> int:
     """Count assignments for this feed awaiting user review (classification_confirmed=false)."""
     try:
@@ -1273,10 +1286,11 @@ def sync_ls_feeds(user_id: str = Depends(get_current_user)):
                 {"last_synced_at": now_iso}
             ).eq("id", feed["id"]).execute()
 
-            # AI-classify any newly inserted items
+            # AI-classify any newly inserted items, then estimate their time
             new_items = counts.pop("new_items", [])
             if new_items:
                 _classify_and_save(new_items, feed["course_name"])
+                _estimate_and_save(new_items)
 
             pending = _count_pending_review(user_id, feed["id"])
             results.append({

@@ -87,6 +87,48 @@ def _to_eod_mountain(dtstart) -> str | None:
     return None
 
 
+def _resolve_due_date(dtstart_val, dtend_val) -> tuple[str | None, bool]:
+    """Determine the actual due date and whether this event is likely course content (not a deliverable).
+
+    Rules:
+    - DTEND is a real datetime with a non-midnight time → assignment with actual deadline, use DTEND
+    - DTEND is date-only AND same day as DTSTART → no real deadline, treat as course content
+    - DTEND is date-only but different day, or missing → use DTSTART as EOD fallback (assignment)
+
+    Returns:
+        (due_date_iso, is_course_content)
+    """
+    # Normalize dtstart to a date for comparison
+    dtstart_date = dtstart_val.date() if isinstance(dtstart_val, datetime) else dtstart_val
+
+    if dtend_val is not None:
+        if isinstance(dtend_val, datetime):
+            # DTEND has a real time component — this is a proper deadline
+            if dtend_val.tzinfo is None:
+                dtend_val = dtend_val.replace(tzinfo=MOUNTAIN)
+            mt = dtend_val.astimezone(MOUNTAIN)
+            # If DTEND is midnight it's probably just a date-boundary marker, not a real time
+            if mt.hour == 0 and mt.minute == 0 and mt.second == 0:
+                dtend_date = mt.date()
+                if dtend_date == dtstart_date:
+                    return _to_eod_mountain(dtstart_val), True  # same-day, no real deadline
+                return _to_eod_mountain(dtstart_val), False
+            return mt.isoformat(), False  # real due time (e.g. 8:00 AM Tuesday)
+        else:
+            # DTEND is date-only
+            dtend_date = dtend_val
+            if dtend_date == dtstart_date:
+                # Same day as DTSTART → class topic / reading guide, not a deliverable
+                return _to_eod_mountain(dtstart_val), True
+            # Different day → treat as a deliverable with EOD on DTEND
+            mt_eod = datetime(dtend_date.year, dtend_date.month, dtend_date.day,
+                              23, 59, 59, tzinfo=MOUNTAIN)
+            return mt_eod.isoformat(), False
+
+    # No DTEND → fall back to DTSTART EOD
+    return _to_eod_mountain(dtstart_val), False
+
+
 def fetch_and_parse(url: str, course_name: str) -> list[dict]:
     """Fetch an iCal feed URL and return a list of assignment dicts.
 
@@ -96,6 +138,8 @@ def fetch_and_parse(url: str, course_name: str) -> list[dict]:
 
     Returns:
         List of assignment dicts compatible with the assignments table schema.
+        Includes both graded assignments and course_content items (class topics etc.)
+        so stale cleanup can track all UIDs. Dashboard filters out course_content.
         Missing SUMMARY or DTSTART events are skipped.
     """
     try:
@@ -121,13 +165,16 @@ def fetch_and_parse(url: str, course_name: str) -> list[dict]:
         if not title:
             continue
 
-        # Skip non-assignment events (class sessions, office hours, TA hours, etc.)
+        # Hard-skip actual class session markers (these are in fetch_class_sessions instead)
         if _NON_ASSIGNMENT_RE.search(title):
-            logger.debug(f"iCal: skipping non-assignment event: {title!r}")
+            logger.debug(f"iCal: skipping class session event: {title!r}")
             continue
 
         dtstart_val = dtstart_prop.dt if hasattr(dtstart_prop, 'dt') else dtstart_prop
-        due_date = _to_eod_mountain(dtstart_val)
+        dtend_prop = component.get('DTEND')
+        dtend_val = dtend_prop.dt if dtend_prop and hasattr(dtend_prop, 'dt') else None
+
+        due_date, is_course_content = _resolve_due_date(dtstart_val, dtend_val)
         if not due_date:
             continue
 
@@ -150,9 +197,14 @@ def fetch_and_parse(url: str, course_name: str) -> list[dict]:
             "assignment_type": _infer_assignment_type(title),
             "point_value": None,
             "is_extra_credit": False,
+            # content_type_hint: set at parse time from structural rules.
+            # AI classifier may override this for ambiguous items later.
+            "content_type_hint": "course_content" if is_course_content else None,
         })
 
-    logger.info(f"iCal: {course_name} → {len(assignments)} events from {url}")
+    graded = sum(1 for a in assignments if not a.get("content_type_hint"))
+    content = len(assignments) - graded
+    logger.info(f"iCal: {course_name} → {graded} graded, {content} course_content (structural) from {url}")
     return assignments
 
 
@@ -275,6 +327,9 @@ def update_database(assignments: list[dict], supabase_client=None, user_id: str 
             continue
 
         try:
+            content_type_hint = a.get("content_type_hint")  # set structurally at parse time
+            is_definite_content = content_type_hint == "course_content"
+
             metadata_fields = {
                 "title":           a["title"],
                 "course_name":     a["course_name"],
@@ -284,6 +339,10 @@ def update_database(assignments: list[dict], supabase_client=None, user_id: str 
                 "last_scraped_at": now_iso,
                 "source":          "learning_suite",
                 "ls_ical_uid":     ls_ical_uid,
+                # Structurally-certain course_content items are confirmed immediately.
+                # Ambiguous items get classification_confirmed=False so AI reviews them.
+                "content_type":              "course_content" if is_definite_content else "graded",
+                "classification_confirmed":  is_definite_content,
             }
             if user_id:
                 metadata_fields["user_id"] = user_id
@@ -315,11 +374,13 @@ def update_database(assignments: list[dict], supabase_client=None, user_id: str 
                 ).execute()
                 counts["modified"] += 1
             else:
-                metadata_fields["status"] = "newly_assigned"
-                metadata_fields["classification_confirmed"] = False
+                # course_content items get status=unavailable so they never surface in
+                # active-assignment queries; graded items start as newly_assigned.
+                metadata_fields["status"] = "unavailable" if is_definite_content else "newly_assigned"
                 inserted = supabase.table("assignments").insert(metadata_fields).execute()
                 counts["new"] += 1
-                if inserted.data:
+                if inserted.data and not is_definite_content:
+                    # Only queue graded items for AI classification + time estimation
                     row = inserted.data[0]
                     counts["new_items"].append({
                         "id": row["id"],

@@ -13,6 +13,7 @@ Follows the module-level singleton pattern used throughout this project
 """
 
 import os
+import re
 import json
 import logging
 import threading
@@ -436,6 +437,68 @@ Format: [{{"index": 1, "content_type": "graded"}}, {{"index": 2, "content_type":
         logger.error(f"[ai_service] classify_ls_events failed: {e}")
         # Fail open — treat everything as graded so nothing is silently lost
         return {it["uid"]: "graded" for it in items}
+
+
+def estimate_assignment_minutes(items: list[dict]) -> dict[str, int]:
+    """Estimate time in minutes for a batch of new assignments.
+
+    Args:
+        items: List of {"id": str, "title": str, "assignment_type": str} dicts
+
+    Returns:
+        Dict mapping assignment id → estimated_minutes (int)
+    """
+    if not items:
+        return {}
+
+    client = _get_groq_client()
+    numbered = "\n".join(
+        f'{i+1}. [{it.get("assignment_type","Assignment")}] {it["title"]}'
+        for i, it in enumerate(items)
+    )
+    prompt = f"""\
+Estimate how many minutes a typical college student needs to complete each assignment.
+Be realistic — not aspirational. Include reading, thinking, and writing time.
+
+Guidelines:
+- Short reflection / response paper (1-2 pages): 30-60 min
+- Reading assignment (1 chapter): 30-45 min
+- Problem set / homework: 45-90 min
+- Quiz: 20-40 min
+- Exam / midterm: 90-180 min
+- Case study writeup: 60-120 min
+- Discussion board post: 15-30 min
+- Project milestone: 60-180 min
+
+Assignments:
+{numbered}
+
+Respond ONLY with a JSON array. No markdown, no explanation.
+Format: [{{"index": 1, "minutes": 45}}, {{"index": 2, "minutes": 60}}, ...]"""
+
+    try:
+        resp = client.chat.completions.create(
+            model=_FAST_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=256,
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+
+        parsed = json.loads(raw)
+        result = {}
+        for entry in parsed:
+            idx = entry.get("index", 0) - 1
+            mins = entry.get("minutes")
+            if 0 <= idx < len(items) and isinstance(mins, int) and 5 <= mins <= 480:
+                result[items[idx]["id"]] = mins
+        logger.info(f"[ai_service] estimate_assignment_minutes: {len(result)}/{len(items)} estimated")
+        return result
+    except Exception as e:
+        logger.error(f"[ai_service] estimate_assignment_minutes failed: {e}")
+        return {}
 
 
 def generate_suggestions(assignments: list[dict], prefs: Optional[dict] = None) -> list[dict]:
