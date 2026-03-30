@@ -236,12 +236,16 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       const updated = data.results.reduce((s, r) => s + (r.modified || 0), 0)
       setIcalSyncResult(`Synced ${data.synced} course(s): ${added} new, ${updated} updated`)
       setTimeout(() => setIcalSyncResult(null), 4000)
-      // Track pending review counts per feed
-      const pending = {}
-      for (const r of (data.results || [])) {
-        if (r.feed_id && r.pending_review > 0) pending[r.feed_id] = r.pending_review
+
+      // Auto-open review modal if AI found items to hide
+      const firstWithSuggestions = (data.results || []).find(r => r.suggestions?.length > 0)
+      if (firstWithSuggestions) {
+        const feed = icalFeeds.find(f => f.id === firstWithSuggestions.feed_id)
+        if (feed) {
+          // Load the full pending-review list (includes due dates etc.) then open modal
+          openReview(feed.id, feed.course_name)
+        }
       }
-      setFeedPendingCounts(prev => ({ ...prev, ...pending }))
     } catch (err) {
       setIcalError(err.message || 'Sync failed')
     } finally {
@@ -1097,8 +1101,8 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
           <div className="review-modal">
             <div className="review-modal-header">
               <div>
-                <h3 className="review-modal-title">Review assignments</h3>
-                <p className="review-modal-subtitle">{reviewCourseName} — We classified these with AI. Move anything that&apos;s wrong.</p>
+                <h3 className="review-modal-title">Review hidden items</h3>
+                <p className="review-modal-subtitle">{reviewCourseName} — AI flagged items on the right as class content (not assignments). Move anything back to the left if it&apos;s actually something you need to do.</p>
               </div>
               <button className="settings-close" onClick={() => setReviewFeedId(null)} aria-label="Close">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

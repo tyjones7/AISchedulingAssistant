@@ -1190,41 +1190,69 @@ def _classify_and_save(new_items: list[dict], course_name: str) -> None:
         logger.error(f"_classify_and_save failed: {e}")
 
 
-def _reclassify_unconfirmed_and_return_new(user_id: str, course_name: str) -> list[dict]:
-    """Fetch all unconfirmed assignments for this course, run AI classification,
-    persist content_type, and return the graded ones (for time estimation)."""
+def _reclassify_all_and_return_suggestions(user_id: str, course_name: str) -> dict:
+    """Run AI classification on ALL items for this course.
+
+    - Items AI marks as course_content that haven't been user-confirmed get flagged
+      as pending review (classification_confirmed=False, content_type=course_content)
+      so the frontend can show them for user approval.
+    - Items AI marks as graded keep content_type=graded.
+    - Already user-confirmed items (classification_confirmed=True AND content_type
+      was explicitly set by user) are left alone.
+    - Returns {"suggestions": [...course_content candidates...], "graded_unestimated": [...]}
+    """
     try:
         resp = supabase_service.table("assignments").select(
-            "id, title, assignment_type, estimated_minutes, classification_confirmed, content_type"
-        ).eq("user_id", user_id).eq("course_name", course_name).eq(
-            "classification_confirmed", False
+            "id, title, assignment_type, estimated_minutes, classification_confirmed, content_type, status"
+        ).eq("user_id", user_id).eq("course_name", course_name).neq(
+            "status", "submitted"
         ).execute()
         items = resp.data or []
         if not items:
-            return []
+            return {"suggestions": [], "graded_unestimated": []}
 
         mapping = ai_service.classify_ls_events(
             [{"uid": it["id"], "title": it["title"]} for it in items],
             course_name,
         )
-        graded_new = []
+
+        suggestions = []
+        graded_unestimated = []
+
         for it in items:
             ct = mapping.get(it["id"], "graded")
-            new_status = "unavailable" if ct == "course_content" else None
-            update = {"content_type": ct, "classification_confirmed": True}
-            if new_status:
-                update["status"] = new_status
-            supabase_service.table("assignments").update(update).eq("id", it["id"]).execute()
-            if ct == "graded" and not it.get("estimated_minutes"):
-                graded_new.append({"id": it["id"], "title": it["title"],
-                                    "assignment_type": it.get("assignment_type", "Assignment")})
+            already_confirmed = it.get("classification_confirmed") and it.get("content_type") != "graded"
 
-        logger.info(f"_reclassify_unconfirmed: {len(items)} items for {course_name!r}, "
-                    f"{sum(1 for v in mapping.values() if v=='course_content')} course_content")
-        return graded_new
+            if already_confirmed:
+                # User already reviewed this item — don't touch it
+                continue
+
+            if ct == "course_content":
+                # Flag for user review — don't hide automatically, let user confirm
+                supabase_service.table("assignments").update({
+                    "content_type": "course_content",
+                    "classification_confirmed": False,
+                }).eq("id", it["id"]).execute()
+                suggestions.append({"id": it["id"], "title": it["title"],
+                                     "course_name": course_name})
+            else:
+                # Graded — mark confirmed and queue for time estimation if needed
+                supabase_service.table("assignments").update({
+                    "content_type": "graded",
+                    "classification_confirmed": True,
+                }).eq("id", it["id"]).execute()
+                if not it.get("estimated_minutes"):
+                    graded_unestimated.append({
+                        "id": it["id"], "title": it["title"],
+                        "assignment_type": it.get("assignment_type", "Assignment"),
+                    })
+
+        logger.info(f"_reclassify_all: {len(items)} items for {course_name!r}, "
+                    f"{len(suggestions)} course_content suggestions")
+        return {"suggestions": suggestions, "graded_unestimated": graded_unestimated}
     except Exception as e:
-        logger.error(f"_reclassify_unconfirmed failed: {e}")
-        return []
+        logger.error(f"_reclassify_all failed: {e}")
+        return {"suggestions": [], "graded_unestimated": []}
 
 
 def _estimate_and_save(new_items: list[dict]) -> None:
@@ -1323,20 +1351,16 @@ def sync_ls_feeds(user_id: str = Depends(get_current_user)):
                 {"last_synced_at": now_iso}
             ).eq("id", feed["id"]).execute()
 
-            # Reclassify ALL unconfirmed items for this course (catches pre-existing items
-            # that were inserted before migration 018 ran, plus any new ones).
-            # Then estimate time only for newly inserted graded items.
-            counts.pop("new_items", [])  # consumed by reclassify below
-            graded_new = _reclassify_unconfirmed_and_return_new(user_id, feed["course_name"])
-            if graded_new:
-                _estimate_and_save(graded_new)
+            counts.pop("new_items", [])
+            classified = _reclassify_all_and_return_suggestions(user_id, feed["course_name"])
+            if classified["graded_unestimated"]:
+                _estimate_and_save(classified["graded_unestimated"])
 
-            pending = _count_pending_review(user_id, feed["id"])
             results.append({
                 "feed_id": feed["id"],
                 "course_name": feed["course_name"],
                 **counts,
-                "pending_review": pending,
+                "suggestions": classified["suggestions"],
                 "error": None,
             })
         except Exception as e:
