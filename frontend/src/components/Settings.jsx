@@ -1099,82 +1099,98 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       {reviewFeedId && (
         <div className="review-backdrop" onClick={(e) => e.target === e.currentTarget && setReviewFeedId(null)}>
           <div className="review-modal">
+
+            {/* Header */}
             <div className="review-modal-header">
-              <div>
-                <h3 className="review-modal-title">Review hidden items</h3>
-                <p className="review-modal-subtitle">{reviewCourseName} — AI flagged items on the right as class content (not assignments). Move anything back to the left if it&apos;s actually something you need to do.</p>
+              <div className="review-header-icon">✦</div>
+              <div className="review-header-text">
+                <h3 className="review-modal-title">Clean up your dashboard</h3>
+                <p className="review-modal-subtitle">
+                  AI scanned <strong>{reviewCourseName}</strong> and flagged {reviewItems.filter(i => i.content_type === 'course_content').length} items
+                  that look like class content, not assignments. Toggle anything the AI got wrong.
+                </p>
               </div>
-              <button className="settings-close" onClick={() => setReviewFeedId(null)} aria-label="Close">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+              <button className="review-close-btn" onClick={() => setReviewFeedId(null)} aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
 
             {reviewLoading ? (
-              <div className="review-loading">Classifying with AI…</div>
+              <div className="review-loading">
+                <div className="review-loading-spinner" />
+                Classifying with AI…
+              </div>
             ) : reviewItems.length === 0 ? (
-              <div className="review-loading">Nothing to review.</div>
+              <div className="review-loading">Everything looks good — nothing to review.</div>
             ) : (
               <>
-                <div className="review-columns">
-                  <div className="review-col">
-                    <div className="review-col-header review-col-graded">
-                      <span className="review-col-icon">✓</span> Assignments
-                      <span className="review-col-count">{reviewItems.filter(i => i.content_type === 'graded').length}</span>
-                    </div>
-                    <ul className="review-list">
-                      {reviewItems.filter(i => i.content_type === 'graded').map(item => (
-                        <li key={item.id} className="review-item">
-                          <span className="review-item-title">{item.title}</span>
-                          {item.due_date && (
-                            <span className="review-item-due">
-                              {new Date(item.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </span>
-                          )}
-                          <button className="review-move-btn" onClick={() => toggleReviewItem(item.id)} title="Move to Class Content">
-                            →
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="review-col">
-                    <div className="review-col-header review-col-content">
-                      <span className="review-col-icon">✕</span> Hidden from dashboard
-                      <span className="review-col-count">{reviewItems.filter(i => i.content_type === 'course_content').length}</span>
-                    </div>
-                    <ul className="review-list">
-                      {reviewItems.filter(i => i.content_type === 'course_content').map(item => (
-                        <li key={item.id} className="review-item review-item-hidden">
-                          <span className="review-item-title">{item.title}</span>
-                          {item.due_date && (
-                            <span className="review-item-due">
-                              {new Date(item.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </span>
-                          )}
-                          <button className="review-move-btn review-move-back" onClick={() => toggleReviewItem(item.id)} title="Move to Assignments">
-                            ←
-                          </button>
-                        </li>
-                      ))}
-                      {reviewItems.filter(i => i.content_type === 'course_content').length === 0 && (
-                        <li className="review-empty">Nothing hidden</li>
-                      )}
-                    </ul>
-                  </div>
+                {/* Legend */}
+                <div className="review-legend">
+                  <span className="review-legend-item review-legend-shown">
+                    <span className="review-legend-dot" /> Shown on dashboard
+                  </span>
+                  <span className="review-legend-item review-legend-hidden">
+                    <span className="review-legend-dot" /> Hidden from dashboard
+                  </span>
                 </div>
 
+                {/* Item list */}
+                <ul className="review-list">
+                  {reviewItems.map(item => {
+                    const isHidden = item.content_type === 'course_content'
+                    return (
+                      <li key={item.id} className={`review-item ${isHidden ? 'review-item-hidden' : ''}`}>
+                        <div className="review-item-info">
+                          <span className="review-item-title">{item.title}</span>
+                          {item.due_date && (
+                            <span className="review-item-due">
+                              {new Date(item.due_date).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          className={`review-toggle-btn ${isHidden ? 'review-toggle-hidden' : 'review-toggle-shown'}`}
+                          onClick={() => toggleReviewItem(item.id)}
+                        >
+                          {isHidden ? (
+                            <>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                              Hidden
+                            </>
+                          ) : (
+                            <>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                              Shown
+                            </>
+                          )}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+
+                {/* Footer */}
                 <div className="review-modal-footer">
-                  <p className="review-footer-hint">Tap → to hide an item, ← to restore it.</p>
-                  <button
-                    className="settings-primary-btn"
-                    onClick={handleConfirmReview}
-                    disabled={reviewSaving}
-                  >
-                    {reviewSaving ? 'Saving…' : 'Confirm & apply'}
-                  </button>
+                  <div className="review-footer-summary">
+                    <span className="review-summary-shown">{reviewItems.filter(i => i.content_type === 'graded').length} shown</span>
+                    <span className="review-summary-sep">·</span>
+                    <span className="review-summary-hidden">{reviewItems.filter(i => i.content_type === 'course_content').length} hidden</span>
+                  </div>
+                  <div className="review-footer-actions">
+                    <button
+                      className="review-hide-all-btn"
+                      onClick={() => setReviewItems(prev => prev.map(it => ({ ...it, content_type: 'course_content' })))}
+                    >
+                      Hide all
+                    </button>
+                    <button
+                      className="review-confirm-btn"
+                      onClick={handleConfirmReview}
+                      disabled={reviewSaving}
+                    >
+                      {reviewSaving ? 'Saving…' : 'Apply'}
+                    </button>
+                  </div>
                 </div>
               </>
             )}
