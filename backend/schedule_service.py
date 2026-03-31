@@ -1,23 +1,29 @@
 """
 Scheduling engine for CampusAI.
 
-Two scheduling paths:
-  1. generate_schedule_ai()   — AI-powered: uses Groq to reason about the best
-                                assignment for each free slot (recommended)
-  2. generate_schedule()      — Rules-based fallback: earliest-deadline-first
-                                bin-packing, used when AI is unavailable
+Hybrid scheduling approach:
+  generate_schedule_ai()  — AI scores priorities + rules engine does all placement.
+                            Guarantees: daily cap, multi-day spreading, break gaps,
+                            never schedule after due date.
+  generate_schedule()     — Pure rules fallback (earliest-deadline-first bin-packing)
+                            used when AI is unavailable.
 
-Both functions accept (user_id, supabase_client) and return:
-  {"blocks": [list of dicts ready for DB insert], "overbooked": [...]}
-
-Public helpers:
-  compute_free_slots()        — returns free time windows per day
-  format_free_slots_for_ai()  — formats free slots as human-readable text for AI prompts
+Scheduling constants (tunable):
+  DAILY_CAP_MIN    = 150   max study minutes per day (2.5 h)
+  BREAK_GAP_MIN    = 8     mandatory gap after each study block
+  MAX_SESSION_MIN  = 90    hard cap on a single study session
+  MIN_BLOCK_MIN    = 20    minimum useful block length
 """
 
 import logging
+from collections import defaultdict
 from datetime import datetime, timedelta, time, date as _date_type
 from zoneinfo import ZoneInfo
+
+DAILY_CAP_MIN   = 150
+BREAK_GAP_MIN   = 8
+MAX_SESSION_MIN = 90
+MIN_BLOCK_MIN   = 20
 
 logger = logging.getLogger(__name__)
 MOUNTAIN = ZoneInfo("America/Denver")
@@ -142,29 +148,31 @@ def format_free_slots_for_ai(free_slots_by_day: dict[str, list[tuple[datetime, d
 
 
 def generate_schedule_ai(user_id: str, supabase_client, days: int = 7) -> dict:
-    """Generate an AI-powered weekly schedule using Groq.
+    """Hybrid scheduler: AI priority scoring + rules-based slot placement.
 
-    Computes free slots locally (fast), then sends them + assignments to the AI
-    which reasons about priorities, task types, and work style to fill the slots.
+    AI is used ONLY to rank assignments by urgency and fill missing time estimates.
+    All placement math (daily cap, spreading, break gaps, due-date cutoff) is done
+    by the rules engine below — LLMs are unreliable at arithmetic constraints.
+
+    Guarantees:
+      - No block scheduled on or after its assignment's due date
+      - Max DAILY_CAP_MIN minutes of study per day
+      - At most one session per assignment per day (forces multi-day spreading)
+      - BREAK_GAP_MIN gap consumed from the slot after each block
+      - Sessions capped at min(session_length_minutes, MAX_SESSION_MIN)
 
     Falls back to generate_schedule() if AI raises an exception.
-
-    Returns:
-        {
-            "blocks": [list of dicts ready for DB insert],
-            "overbooked": [list of task dicts that couldn't be fully scheduled],
-        }
     """
     import ai_service
 
-    # ── 1. Fetch active tasks ──
+    # ── 1. Fetch active graded tasks ──
     resp = supabase_client.table("assignments").select(
         "id, title, course_name, due_date, estimated_minutes, task_type, assignment_type, status, point_value, notes"
     ).eq("user_id", user_id).not_.in_("status", ["submitted", "unavailable"]).execute()
 
     tasks = resp.data or []
     if not tasks:
-        logger.info(f"schedule_ai [{user_id[:8]}]: no active tasks")
+        logger.info(f"schedule_hybrid [{user_id[:8]}]: no active tasks")
         return {"blocks": [], "overbooked": []}
 
     # ── 2. Fetch preferences ──
@@ -174,116 +182,139 @@ def generate_schedule_ai(user_id: str, supabase_client, days: int = 7) -> dict:
     ).eq("user_id", user_id).limit(1).execute()
     prefs = prefs_resp.data[0] if prefs_resp.data else {}
 
-    # ── 3. Compute free slots ──
-    free_slots_by_day = compute_free_slots(prefs, days=days)
-    free_slots_text = format_free_slots_for_ai(free_slots_by_day)
+    max_session_min = min(prefs.get("session_length_minutes") or 60, MAX_SESSION_MIN)
 
-    # ── 4. Call AI scheduler ──
-    logger.info(f"schedule_ai [{user_id[:8]}]: calling AI for {len(tasks)} tasks")
+    # ── 3. AI: priority scores + fill missing estimates ──
+    score_map: dict[str, dict] = {}
     try:
-        result = ai_service.generate_ai_schedule(tasks, free_slots_text, prefs)
+        suggestions = ai_service.generate_suggestions(tasks, prefs)
+        for s in suggestions:
+            score_map[s["assignment_id"]] = s
+        # Apply AI-estimated minutes to tasks that have none
+        for t in tasks:
+            if not t.get("estimated_minutes"):
+                ai_est = score_map.get(t["id"], {}).get("estimated_minutes")
+                if ai_est:
+                    t["estimated_minutes"] = ai_est
+        logger.info(f"schedule_hybrid [{user_id[:8]}]: AI scored {len(score_map)} tasks")
     except Exception as e:
-        logger.warning(f"schedule_ai [{user_id[:8]}]: AI failed ({e}), falling back to rules-based")
-        return generate_schedule(user_id, supabase_client, days=days)
+        logger.warning(f"schedule_hybrid [{user_id[:8]}]: AI priority failed ({e}), using deadline order")
 
-    # ── 5. Convert AI output to DB-ready rows ──
-    valid_ids = {t["id"] for t in tasks}
-    id_to_task = {t["id"]: t for t in tasks}
-    new_blocks = []
-    today = datetime.now(MOUNTAIN).date()
+    # ── 4. Sort: highest priority first, then earliest due date ──
+    def _sort_key(t):
+        score = score_map.get(t["id"], {}).get("priority_score", 5)
+        due   = t.get("due_date") or "9999-12-31"
+        return (-score, due)
 
-    for b in result.get("blocks", []):
-        aid = b.get("assignment_id", "")
-        if aid not in valid_ids:
-            logger.warning(f"schedule_ai: skipping block with unknown assignment_id {aid!r}")
-            continue
+    tasks.sort(key=_sort_key)
 
-        date_str = b.get("date", "")
-        start_str = b.get("start_time", "")
-        end_str = b.get("end_time", "")
-        label = b.get("label", "")
+    # ── 5. Compute free slots (mutable copy we consume as we place blocks) ──
+    free_slots_by_day = compute_free_slots(prefs, days=days)
+    # Each slot is [start_dt, end_dt] — mutable list so we can shrink it
+    slots: dict[str, list[list]] = {
+        d: [[s, e] for s, e in windows]
+        for d, windows in free_slots_by_day.items()
+    }
 
-        try:
-            sh, sm = _parse_hm(start_str)
-            eh, em = _parse_hm(end_str)
-            day = _date_type.fromisoformat(date_str)
-            start_dt = datetime.combine(day, time(sh, sm)).replace(tzinfo=MOUNTAIN)
-            end_dt   = datetime.combine(day, time(eh, em)).replace(tzinfo=MOUNTAIN)
-            if end_dt <= start_dt:
-                logger.warning(f"schedule_ai: skipping zero/negative block for {aid}")
-                continue
-        except Exception as ex:
-            logger.warning(f"schedule_ai: could not parse block times {start_str}–{end_str}: {ex}")
-            continue
+    today       = datetime.now(MOUNTAIN).date()
+    daily_used  = defaultdict(int)   # date_str → minutes already placed
+    new_blocks  = []
+    id_to_task  = {t["id"]: t for t in tasks}
 
-        # Hard rule: never schedule a block after the assignment's due date
-        task = id_to_task.get(aid, {})
+    # ── 6. Rules-based placement ──
+    for task in tasks:
+        est = task.get("estimated_minutes") or 60
+        remaining = est
+
+        due_dt_mt = None
         due_str = task.get("due_date")
         if due_str:
             try:
-                due_dt = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
-                if start_dt >= due_dt.astimezone(MOUNTAIN):
-                    logger.warning(
-                        f"schedule_ai: dropping block for {task.get('title')!r} on {date_str} "
-                        f"— starts at or after due date {due_dt.date()}"
-                    )
-                    continue
+                due_dt_mt = datetime.fromisoformat(
+                    due_str.replace("Z", "+00:00")
+                ).astimezone(MOUNTAIN)
             except Exception:
                 pass
 
-        # Verify block doesn't land in a busy slot
-        day_free = free_slots_by_day.get(date_str, [])
-        fits = any(fs <= start_dt and end_dt <= fe for fs, fe in day_free)
-        if not fits:
-            # Allow with a warning — AI may slightly exceed slots; don't silently drop valid work
-            logger.debug(f"schedule_ai: block {aid} {date_str} {start_str}–{end_str} slightly outside free slots, keeping")
+        # Walk days in order, place at most one session per day per assignment
+        for date_str in sorted(slots.keys()):
+            if remaining <= 0:
+                break
 
-        new_blocks.append({
-            "user_id":       user_id,
-            "assignment_id": aid,
-            "date":          date_str,
-            "start_time":    start_dt.isoformat(),
-            "end_time":      end_dt.isoformat(),
-            "label":         label or id_to_task.get(aid, {}).get("title", "Study"),
-            "status":        "planned",
-            "plan_version":  1,
-        })
+            day = _date_type.fromisoformat(date_str)
+            if day < today:
+                continue
 
-    # ── 6. Back-fill estimated_minutes for tasks that had none ──
-    # Tally total scheduled minutes per assignment_id from the blocks we just built,
-    # then write back to assignments where estimated_minutes was null/missing.
-    scheduled_minutes: dict[str, int] = {}
+            # Never schedule on or after the due date
+            if due_dt_mt and day >= due_dt_mt.date():
+                break
+
+            # Respect daily cap
+            cap_left = DAILY_CAP_MIN - daily_used[date_str]
+            if cap_left < MIN_BLOCK_MIN:
+                continue
+
+            # Find first usable slot on this day
+            for slot in slots[date_str]:
+                slot_start, slot_end = slot
+                avail_min = int((slot_end - slot_start).total_seconds() / 60)
+                if avail_min < MIN_BLOCK_MIN:
+                    continue
+
+                block_len = min(max_session_min, remaining, cap_left, avail_min)
+                if block_len < MIN_BLOCK_MIN:
+                    continue
+
+                block_end = slot_start + timedelta(minutes=block_len)
+                new_blocks.append({
+                    "user_id":       user_id,
+                    "assignment_id": task["id"],
+                    "date":          date_str,
+                    "start_time":    slot_start.isoformat(),
+                    "end_time":      block_end.isoformat(),
+                    "label":         task.get("title", "Study"),
+                    "status":        "planned",
+                    "plan_version":  1,
+                })
+
+                remaining           -= block_len
+                daily_used[date_str] += block_len
+
+                # Advance slot by block + mandatory break gap
+                new_slot_start = block_end + timedelta(minutes=BREAK_GAP_MIN)
+                slot[0] = new_slot_start  # mutate in place
+
+                break  # one session per assignment per day — forces spreading
+
+    # ── 7. Back-fill estimated_minutes for tasks that still had none ──
+    scheduled_min_by_id: dict[str, int] = defaultdict(int)
     for b in new_blocks:
-        aid = b["assignment_id"]
-        dur = int((datetime.fromisoformat(b["end_time"]) - datetime.fromisoformat(b["start_time"])).total_seconds() / 60)
-        scheduled_minutes[aid] = scheduled_minutes.get(aid, 0) + dur
+        dur = int((datetime.fromisoformat(b["end_time"]) -
+                   datetime.fromisoformat(b["start_time"])).total_seconds() / 60)
+        scheduled_min_by_id[b["assignment_id"]] += dur
 
     for t in tasks:
-        if not t.get("estimated_minutes") and scheduled_minutes.get(t["id"], 0) > 0:
+        if not t.get("estimated_minutes") and scheduled_min_by_id.get(t["id"], 0) > 0:
             try:
                 supabase_client.table("assignments").update(
-                    {"estimated_minutes": scheduled_minutes[t["id"]]}
+                    {"estimated_minutes": scheduled_min_by_id[t["id"]]}
                 ).eq("id", t["id"]).eq("user_id", user_id).execute()
-                logger.info(f"schedule_ai: set estimated_minutes={scheduled_minutes[t['id']]} for {t['title']!r}")
-            except Exception as e:
-                logger.warning(f"schedule_ai: failed to write estimate for {t['id']}: {e}")
+            except Exception:
+                pass
 
-    # Determine overbooked tasks (those with no scheduled blocks)
-    scheduled_ids = {b["assignment_id"] for b in new_blocks}
-    overbooked_titles = result.get("overbooked", [])
-    # Also catch tasks the AI silently omitted
-    for t in tasks:
-        if t["id"] not in scheduled_ids and t.get("estimated_minutes"):
-            if t["title"] not in overbooked_titles:
-                overbooked_titles.append(t["title"])
-
-    overbooked_tasks = [t for t in tasks if t["title"] in overbooked_titles]
+    # ── 8. Overbooked = tasks with less than 50% of their time scheduled ──
+    overbooked = [
+        t for t in tasks
+        if scheduled_min_by_id.get(t["id"], 0) < (t.get("estimated_minutes") or 60) * 0.5
+    ]
 
     logger.info(
-        f"schedule_ai [{user_id[:8]}]: {len(new_blocks)} blocks ready, "
-        f"{len(overbooked_tasks)} overbooked"
+        f"schedule_hybrid [{user_id[:8]}]: {len(new_blocks)} blocks across "
+        f"{len({b['date'] for b in new_blocks})} days, "
+        f"{len(overbooked)} overbooked (cap={DAILY_CAP_MIN}min/day, "
+        f"max_session={max_session_min}min)"
     )
-    return {"blocks": new_blocks, "overbooked": overbooked_tasks}
+    return {"blocks": new_blocks, "overbooked": overbooked}
 
 
 def generate_schedule(user_id: str, supabase_client, days: int = 7) -> dict:
