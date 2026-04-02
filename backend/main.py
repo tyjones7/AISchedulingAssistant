@@ -597,27 +597,34 @@ def generate_schedule_endpoint(user_id: str = Depends(get_current_user)):
     from schedule_service import generate_schedule_ai
 
     try:
-        # Remove existing planned blocks only (keep completed/skipped for history)
+        from datetime import date as _date
+        from zoneinfo import ZoneInfo as _ZI
+        _mt = _ZI("America/Denver")
+        today_str = datetime.now(_mt).date().isoformat()
+
+        # Only delete FUTURE planned blocks — past blocks stay for history.
+        # Completed/skipped blocks are never touched.
         supabase_service.table("time_blocks").delete().eq(
             "user_id", user_id
-        ).eq("status", "planned").execute()
+        ).eq("status", "planned").gte("date", today_str).execute()
 
         result = generate_schedule_ai(user_id, supabase_service)
 
         if result["blocks"]:
             supabase_service.table("time_blocks").insert(result["blocks"]).execute()
 
-        # Return saved blocks with assignment info joined
-        from datetime import date as _date
-        today = _date.today().isoformat()
-        week_end = (_date.today() + timedelta(days=7)).isoformat()
+        # Return the full current week (Mon–Sun) so the frontend shows past + new blocks.
+        today_date = datetime.now(_mt).date()
+        week_mon = today_date - timedelta(days=today_date.weekday())
+        week_sun = week_mon + timedelta(days=7)
         saved = supabase_service.table("time_blocks").select(
             "*, assignments(title, course_name, task_type, estimated_minutes)"
-        ).eq("user_id", user_id).gte("date", today).lt("date", week_end).order("start_time").execute()
+        ).eq("user_id", user_id).gte("date", week_mon.isoformat()).lt(
+            "date", week_sun.isoformat()
+        ).order("start_time").execute()
 
         return {
             "blocks": saved.data or [],
-            "overbooked": result["overbooked"],
             "total_blocks": len(result["blocks"]),
         }
     except Exception as e:
@@ -952,10 +959,25 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
     except Exception as e:
         logger.warning(f"POST /ai/chat: external calendar fetch failed: {e}")
 
-    # Compute exact free time windows (same data used by auto-generate)
+    # Compute exact free time windows — same data the scheduler uses (includes LS class sessions)
     try:
         from schedule_service import compute_free_slots, format_free_slots_for_ai
-        free_slots_by_day = compute_free_slots(prefs, days=7)
+        from ical_client import fetch_class_sessions as _fetch_sessions
+        _class_busy: dict = {}
+        try:
+            _feeds = supabase_service.table("ls_ical_feeds").select("url, course_name").eq("user_id", user_id).execute()
+            for _feed in (_feeds.data or []):
+                try:
+                    _sessions = _fetch_sessions(_feed["url"], _feed["course_name"])
+                    for _s in _sessions:
+                        _s_dt = datetime.fromisoformat(_s["start"]).astimezone(_mt)
+                        _e_dt = datetime.fromisoformat(_s["end"]).astimezone(_mt)
+                        _class_busy.setdefault(_s["date"], []).append((_s_dt, _e_dt))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        free_slots_by_day = compute_free_slots(prefs, days=7, extra_busy_by_day=_class_busy)
         _base_slots_text = format_free_slots_for_ai(free_slots_by_day)
         if _ext_busy_lines:
             free_slots_text = _base_slots_text + "\n\nExternal calendar commitments this week:\n" + "\n".join(_ext_busy_lines)
@@ -989,22 +1011,60 @@ async def ai_chat(req: AIChatRequest, user_id: str = Depends(get_current_user)):
         f"{len(time_blocks)} blocks, free_slots={'yes' if free_slots_text else 'no'}"
     )
 
+    import threading as _threading
+    import queue as _queue
+
     def event_stream():
-        try:
-            for chunk in ai_service.chat_stream(
-                messages_dicts, assignments, prefs, time_blocks,
-                free_slots_text=free_slots_text,
-                completed_minutes=completed_minutes,
-            ):
-                yield f"data: {json.dumps({'delta': chunk})}\n\n"
-        except RuntimeError as e:
-            yield f"data: {json.dumps({'error': str(e), 'code': 503})}\n\n"
-        except Exception as e:
-            msg = str(e)
-            code = 429 if ("rate_limit" in msg.lower() or "429" in msg) else 502
-            yield f"data: {json.dumps({'error': msg, 'code': code})}\n\n"
-        finally:
-            yield "data: [DONE]\n\n"
+        """Stream AI response with keep-alive pings to prevent proxy/load-balancer timeouts.
+
+        Uses a background thread so we can emit pings while waiting for the
+        first token from Groq (which can take several seconds).
+        """
+        q: _queue.Queue = _queue.Queue()
+        PING_INTERVAL = 20  # seconds between keep-alive comments
+
+        def groq_worker():
+            try:
+                for chunk in ai_service.chat_stream(
+                    messages_dicts, assignments, prefs, time_blocks,
+                    free_slots_text=free_slots_text,
+                    completed_minutes=completed_minutes,
+                ):
+                    q.put(("data", chunk))
+            except RuntimeError as e:
+                q.put(("error", (str(e), 503)))
+            except Exception as e:
+                msg = str(e)
+                code = 429 if ("rate_limit" in msg.lower() or "429" in msg) else 502
+                q.put(("error", (msg, code)))
+            finally:
+                q.put(("done", None))
+
+        thread = _threading.Thread(target=groq_worker, daemon=True)
+        thread.start()
+
+        # Initial ping — tells the browser (and any intermediate proxies) that
+        # the connection is live before the first token arrives.
+        yield ": keep-alive\n\n"
+
+        while True:
+            try:
+                kind, payload = q.get(timeout=PING_INTERVAL)
+            except _queue.Empty:
+                # No token in PING_INTERVAL seconds — send a comment to reset timeouts
+                yield ": keep-alive\n\n"
+                continue
+
+            if kind == "done":
+                break
+            elif kind == "error":
+                msg, code = payload
+                yield f"data: {json.dumps({'error': msg, 'code': code})}\n\n"
+                break
+            else:
+                yield f"data: {json.dumps({'delta': payload})}\n\n"
+
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         event_stream(),

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { authFetch, API_BASE } from '../lib/api'
 import { downloadTimeBlocksICS } from '../utils/calendar'
 import './WeeklyGrid.css'
@@ -8,9 +8,10 @@ const GRID_END_HOUR   = 22  // 10 pm
 const GRID_START_MIN  = GRID_START_HOUR * 60
 const SLOT_HEIGHT     = 48  // px per 30-min slot
 const SLOT_MIN        = 30
+const SNAP_MIN        = 15  // drag/resize snap resolution
 
 // Each course gets a dark shade (class time) and light shade (study/homework)
-export const PALETTE = [
+export const PALETTE = [ // eslint-disable-line react-refresh/only-export-components
   { dark: '#6366f1', light: '#eef2ff', text: '#3730a3' },
   { dark: '#0ea5e9', light: '#e0f2fe', text: '#0369a1' },
   { dark: '#10b981', light: '#d1fae5', text: '#065f46' },
@@ -23,15 +24,9 @@ export const PALETTE = [
   { dark: '#84cc16', light: '#f7fee7', text: '#3f6212' },
 ]
 
-/**
- * Build a color map assigning each course a unique PALETTE entry.
- * User overrides (courseColorPrefs: {name → paletteIndex}) take priority.
- * Remaining courses are assigned sequentially in sorted order.
- */
-export function buildCourseColorMap(courseNames, courseColorPrefs = {}) {
+export function buildCourseColorMap(courseNames, courseColorPrefs = {}) { // eslint-disable-line react-refresh/only-export-components
   const sorted = [...new Set(courseNames.filter(Boolean))].sort()
   const colorMap = {}
-  // Apply user overrides first
   const usedIndices = new Set()
   for (const name of sorted) {
     const idx = courseColorPrefs[name]
@@ -40,7 +35,6 @@ export function buildCourseColorMap(courseNames, courseColorPrefs = {}) {
       usedIndices.add(Number(idx) % PALETTE.length)
     }
   }
-  // Fill remaining with unused palette slots
   let nextIdx = 0
   for (const name of sorted) {
     if (colorMap[name]) continue
@@ -84,9 +78,17 @@ function blockHeight(startIso, endIso) {
   return Math.max(SLOT_HEIGHT / 2, dur / SLOT_MIN * SLOT_HEIGHT)
 }
 
+function blockHeightFromMin(durMin) {
+  return Math.max(SLOT_HEIGHT / 2, durMin / SLOT_MIN * SLOT_HEIGHT)
+}
+
+function parseHHMM(t) {
+  const [h, m] = t.split(':').map(Number)
+  return h * 60 + m
+}
+
 function classTop(startStr) {
-  const [h, m] = startStr.split(':').map(Number)
-  return Math.max(0, (h * 60 + m - GRID_START_MIN) / SLOT_MIN * SLOT_HEIGHT)
+  return Math.max(0, (parseHHMM(startStr) - GRID_START_MIN) / SLOT_MIN * SLOT_HEIGHT)
 }
 
 function classHeight(startStr, endStr) {
@@ -101,16 +103,18 @@ function formatTime(isoStr) {
   })
 }
 
+function minToTimeStr(totalMin) {
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
 function getWeekStart(d) {
-  // Compute week start entirely in Mountain Time so any browser timezone works.
-  // 1. Find day-of-week in MT
   const dowStr = d.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short' })
   const dowIndex = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(dowStr)
   const daysBack = dowIndex === 0 ? 6 : dowIndex - 1
-  // 2. Get today's MT date string, parse it, subtract to Monday
   const mtStr = getMtDateStr(d)
   const [y, mo, dy] = mtStr.split('-').map(Number)
-  // 3. Store as noon UTC — safe from DST/timezone shifts in any browser locale
   return new Date(Date.UTC(y, mo - 1, dy - daysBack, 12, 0, 0))
 }
 
@@ -118,10 +122,21 @@ const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const TOTAL_SLOTS = (GRID_END_HOUR - GRID_START_HOUR) * 2
 const GRID_HEIGHT = TOTAL_SLOTS * SLOT_HEIGHT
+const PAD = n => String(n).padStart(2, '0')
 
-export default function WeeklyGrid({ preferences, addToast }) {
+const DURATION_OPTIONS = [15, 20, 30, 45, 60, 75, 90, 120]
+
+function getMtCurrentMin() {
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date())
+  const h = parseInt(p.find(x => x.type === 'hour').value) % 24
+  const m = parseInt(p.find(x => x.type === 'minute').value)
+  return h * 60 + m
+}
+
+export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshKey = 0 }) {
   const [blocks, setBlocks] = useState([])
-  const [overbooked, setOverbooked] = useState([])
   const [externalEvents, setExternalEvents] = useState([])
   const [lsClassEvents, setLsClassEvents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -132,10 +147,31 @@ export default function WeeklyGrid({ preferences, addToast }) {
   const [draggedBlockId, setDraggedBlockId] = useState(null)
   const [exporting, setExporting] = useState(false)
 
+  // Current time indicator (updates every minute)
+  const [currentTimeMin, setCurrentTimeMin] = useState(getMtCurrentMin)
+  useEffect(() => {
+    const iv = setInterval(() => setCurrentTimeMin(getMtCurrentMin()), 60000)
+    return () => clearInterval(iv)
+  }, [])
+
+  // Resize state
+  const resizeRef = useRef(null)        // {blockId, dayDateStr, origEndMin, startY}
+  const blocksRef = useRef(blocks)
+  const [resizePreview, setResizePreview] = useState(null) // {blockId, endMin}
+
+  // Click-to-edit popover
+  const [editingBlock, setEditingBlock] = useState(null) // {id, dayDateStr, startMin, durMin, label}
+  const [editStartTime, setEditStartTime] = useState('09:00')
+  const [editDurMin, setEditDurMin] = useState(60)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editPopoverPos, setEditPopoverPos] = useState({ x: 200, y: 200 })
+  const editPopoverRef = useRef(null)
+
+  useEffect(() => { blocksRef.current = blocks }, [blocks])
+
   const weeklySchedule = preferences?.weekly_schedule || []
   const courseColorPrefs = preferences?.course_colors || {}
 
-  // Build a color map with guaranteed unique colors per course
   const courseColorMap = buildCourseColorMap(
     [
       ...blocks.map(b => b.assignments?.course_name),
@@ -147,9 +183,72 @@ export default function WeeklyGrid({ preferences, addToast }) {
 
   const getCourseColor = (name) => courseColorMap[name] || PALETTE[0]
 
+  // Global pointer handlers for resize
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizeRef.current) return
+      const { origEndMin, startY, blockId } = resizeRef.current
+      const deltaY = e.clientY - startY
+      const rawMin = origEndMin + (deltaY / (SLOT_HEIGHT / SLOT_MIN))
+      const snapped = Math.round(rawMin / SNAP_MIN) * SNAP_MIN
+      setResizePreview({ blockId, endMin: snapped })
+    }
+    const onUp = async () => {
+      if (!resizeRef.current) return
+      const { blockId, dayDateStr } = resizeRef.current
+      resizeRef.current = null
+      setResizePreview(prev => {
+        if (!prev || prev.blockId !== blockId) return null
+        const newEndMin = prev.endMin
+        const block = blocksRef.current.find(b => b.id === blockId)
+        if (!block) return null
+        const startMin = getMtHourMin(block.start_time)
+        const clampedEnd = Math.max(startMin + SNAP_MIN, Math.min(GRID_END_HOUR * 60, newEndMin))
+        const off = getMtOffsetStr()
+        const newEnd = `${dayDateStr}T${PAD(Math.floor(clampedEnd / 60))}:${PAD(clampedEnd % 60)}:00${off}`
+        authFetch(`${API_BASE}/time-blocks/${blockId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ end_time: newEnd }),
+        }).then(res => {
+          if (res.ok) {
+            res.json().then(data => {
+              setBlocks(bks => bks.map(b => b.id === blockId ? { ...b, ...data.block } : b))
+            })
+          } else {
+            addToast('Failed to resize block', 'error')
+          }
+        }).catch(() => addToast('Failed to resize block', 'error'))
+        return null
+      })
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [addToast])
+
+  // Close edit popover on outside click
+  useEffect(() => {
+    if (!editingBlock) return
+    const onMouseDown = (e) => {
+      if (editPopoverRef.current && !editPopoverRef.current.contains(e.target)) {
+        setEditingBlock(null)
+      }
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setEditingBlock(null) }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [editingBlock])
+
   useEffect(() => {
     fetchWeek()
-  }, [weekStart]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [weekStart, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchWeek = async () => {
     setLoading(true)
@@ -186,9 +285,9 @@ export default function WeeklyGrid({ preferences, addToast }) {
       const res = await authFetch(`${API_BASE}/schedule/generate`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
-        setBlocks(data.blocks || [])
-        setOverbooked(data.overbooked || [])
         addToast(`Generated ${data.total_blocks} study blocks`, 'success')
+        // Refetch full week from DB (includes past blocks that weren't deleted)
+        await fetchWeek()
       } else {
         addToast('Failed to generate schedule', 'error')
       }
@@ -214,19 +313,22 @@ export default function WeeklyGrid({ preferences, addToast }) {
     }
   }
 
+  // ── Drag (HTML5) — 15-min snap ──────────────────────────────────────────────
   const handleDragStart = (e, blockId) => {
     setDraggedBlockId(blockId)
     e.dataTransfer.effectAllowed = 'move'
   }
 
-  const handleDrop = async (e, dayDateStr, slotIndex) => {
+  const handleDrop = async (e, dayDateStr, pixelY) => {
     e.preventDefault()
     if (!draggedBlockId) return
     const block = blocks.find(b => b.id === draggedBlockId)
     if (!block) return
 
     const durMin = (new Date(block.end_time) - new Date(block.start_time)) / 60000
-    const newStartMin = GRID_START_MIN + slotIndex * SLOT_MIN
+    // Snap to SNAP_MIN intervals
+    const rawStartMin = GRID_START_MIN + pixelY / SLOT_HEIGHT * SLOT_MIN
+    const newStartMin = Math.round(rawStartMin / SNAP_MIN) * SNAP_MIN
     const newEndMin   = newStartMin + durMin
 
     // Conflict check vs class blocks
@@ -241,10 +343,9 @@ export default function WeeklyGrid({ preferences, addToast }) {
       return
     }
 
-    const pad = n => String(n).padStart(2, '0')
     const off = getMtOffsetStr()
-    const newStart = `${dayDateStr}T${pad(Math.floor(newStartMin / 60))}:${pad(newStartMin % 60)}:00${off}`
-    const newEnd   = `${dayDateStr}T${pad(Math.floor(newEndMin / 60) % 24)}:${pad(newEndMin % 60)}:00${off}`
+    const newStart = `${dayDateStr}T${PAD(Math.floor(newStartMin / 60))}:${PAD(newStartMin % 60)}:00${off}`
+    const newEnd   = `${dayDateStr}T${PAD(Math.floor(newEndMin / 60) % 24)}:${PAD(newEndMin % 60)}:00${off}`
 
     try {
       const res = await authFetch(`${API_BASE}/time-blocks/${draggedBlockId}`, {
@@ -275,11 +376,76 @@ export default function WeeklyGrid({ preferences, addToast }) {
     }
   }
 
+  // ── Resize handle ─────────────────────────────────────────────────────────
+  const handleResizeStart = (e, blockId, dayDateStr) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const block = blocksRef.current.find(b => b.id === blockId)
+    if (!block) return
+    const origEndMin = getMtHourMin(block.end_time)
+    resizeRef.current = { blockId, dayDateStr, origEndMin, startY: e.clientY }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  // ── Click-to-edit ─────────────────────────────────────────────────────────
+  const handleBlockClick = (e, block, dayDateStr) => {
+    // Don't open edit if user is dragging or clicking the × button
+    if (draggedBlockId) return
+    if (e.target.closest('.wg-block-remove') || e.target.closest('.wg-block-resize')) return
+    e.stopPropagation()
+
+    const startMin = getMtHourMin(block.start_time)
+    const endMin   = getMtHourMin(block.end_time)
+    const durMin   = endMin - startMin
+
+    setEditStartTime(minToTimeStr(startMin))
+    setEditDurMin(durMin)
+    setEditingBlock({ id: block.id, dayDateStr, startMin, durMin, label: block.label || block.assignments?.title || 'Study' })
+
+    // Position popover near click, keeping in viewport
+    const x = Math.min(e.clientX + 12, window.innerWidth - 260)
+    const y = Math.min(e.clientY - 10, window.innerHeight - 220)
+    setEditPopoverPos({ x, y })
+  }
+
+  const handleEditSave = async () => {
+    if (!editingBlock || editSaving) return
+    setEditSaving(true)
+    const { id, dayDateStr } = editingBlock
+
+    const [hStr, mStr] = editStartTime.split(':')
+    const startMin = parseInt(hStr) * 60 + parseInt(mStr)
+    const endMin   = startMin + editDurMin
+
+    const off = getMtOffsetStr()
+    const newStart = `${dayDateStr}T${PAD(Math.floor(startMin / 60))}:${PAD(startMin % 60)}:00${off}`
+    const newEnd   = `${dayDateStr}T${PAD(Math.floor(endMin / 60) % 24)}:${PAD(endMin % 60)}:00${off}`
+
+    try {
+      const res = await authFetch(`${API_BASE}/time-blocks/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ start_time: newStart, end_time: newEnd }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setBlocks(prev => prev.map(b => b.id === id ? { ...b, ...data.block, date: dayDateStr } : b))
+        setEditingBlock(null)
+        setApproved(false)
+      } else {
+        addToast('Failed to update block', 'error')
+      }
+    } catch {
+      addToast('Failed to update block', 'error')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const classBlocksForDay = (dayDateStr) => {
     const dayAbbrev = new Date(dayDateStr + 'T12:00:00').toLocaleDateString('en-US', {
       timeZone: 'America/Denver', weekday: 'short',
     })
-    // Support both {day: "Mon"} (singular, from Settings) and {days: ["Mon"]} (array, legacy)
     return (weeklySchedule || []).filter(b =>
       b.day === dayAbbrev || (Array.isArray(b.days) && b.days.includes(dayAbbrev))
     )
@@ -342,6 +508,23 @@ export default function WeeklyGrid({ preferences, addToast }) {
           >
             {generating ? 'Generating…' : 'Generate Plan'}
           </button>
+          {onOpenChat && (
+            <button
+              className="wg-btn wg-btn--chat"
+              onClick={() => onOpenChat(blocks.length > 0
+                ? 'I want to adjust my schedule this week. Can you help me optimize it?'
+                : 'Help me build a study plan for this week. Ask me a few questions so we can make it work for me.'
+              )}
+              title="Plan or adjust your schedule with AI"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                width="14" height="14" style={{flexShrink: 0}}>
+                <path d="M12 3l1.88 5.76a1 1 0 0 0 .95.69h6.06l-4.9 3.56a1 1 0 0 0-.36 1.12L17.5 20l-4.9-3.56a1 1 0 0 0-1.18 0L6.5 20l1.87-5.87a1 1 0 0 0-.36-1.12L3.11 9.45h6.06a1 1 0 0 0 .95-.69L12 3z" />
+              </svg>
+              {blocks.length > 0 ? 'Refine with AI' : 'Plan with AI'}
+            </button>
+          )}
           {blocks.length > 0 && (
             <>
               <button
@@ -349,7 +532,7 @@ export default function WeeklyGrid({ preferences, addToast }) {
                 onClick={handleApprove}
                 disabled={approving || approved}
               >
-                {approved ? '✓ Plan Approved' : approving ? 'Approving…' : 'Approve Plan'}
+                {approved ? '✓ Approved' : approving ? 'Approving…' : 'Approve'}
               </button>
               <button
                 className="wg-btn wg-btn--export"
@@ -376,9 +559,9 @@ export default function WeeklyGrid({ preferences, addToast }) {
                   }
                 }}
                 disabled={exporting}
-                title="Export week to .ics (Google/Apple Calendar)"
+                title="Export week to .ics"
               >
-                {exporting ? 'Exporting…' : '↓ Export .ics'}
+                {exporting ? 'Exporting…' : '↓ .ics'}
               </button>
             </>
           )}
@@ -411,6 +594,8 @@ export default function WeeklyGrid({ preferences, addToast }) {
             {weekDates.map((dayDate, di) => {
               const dayDateStr = getMtDateStr(dayDate)
               const isToday = dayDateStr === todayStr
+              const isBeforeToday = dayDateStr < todayStr
+              const isBlockPast = (endTimeStr) => isBeforeToday || (isToday && getMtHourMin(endTimeStr) <= currentTimeMin)
               const clsBlocks = classBlocksForDay(dayDateStr)
               const dayBlocks = timeBlocksForDay(dayDateStr)
               const extEvents = externalEventsForDay(dayDateStr)
@@ -431,10 +616,21 @@ export default function WeeklyGrid({ preferences, addToast }) {
                     onDragOver={e => e.preventDefault()}
                     onDrop={e => {
                       const rect = e.currentTarget.getBoundingClientRect()
-                      const slotIdx = Math.floor((e.clientY - rect.top) / SLOT_HEIGHT)
-                      handleDrop(e, dayDateStr, Math.max(0, Math.min(slotIdx, TOTAL_SLOTS - 1)))
+                      const pixelY = Math.max(0, e.clientY - rect.top)
+                      handleDrop(e, dayDateStr, pixelY)
                     }}
                   >
+
+                    {/* Current time indicator — only in today's column */}
+                    {dayDateStr === todayStr && currentTimeMin >= GRID_START_MIN && currentTimeMin <= GRID_END_HOUR * 60 && (
+                      <div
+                        className="wg-now-line"
+                        style={{ top: Math.max(0, (currentTimeMin - GRID_START_MIN) / SLOT_MIN * SLOT_HEIGHT) }}
+                      >
+                        <div className="wg-now-dot" />
+                      </div>
+                    )}
+
                     {/* Hour/half-hour lines */}
                     {Array.from({ length: TOTAL_SLOTS }).map((_, si) => (
                       <div
@@ -447,10 +643,11 @@ export default function WeeklyGrid({ preferences, addToast }) {
                     {/* Class blocks (read-only) */}
                     {clsBlocks.map((cb, ci) => {
                       const clsColor = getCourseColor(cb.label)
+                      const isClsPast = isBeforeToday || (isToday && parseHHMM(cb.end) <= currentTimeMin)
                       return (
                         <div
                           key={ci}
-                          className="wg-block wg-block--class"
+                          className={`wg-block wg-block--class ${isClsPast ? 'wg-block--past' : ''}`}
                           style={{
                             top: classTop(cb.start),
                             height: classHeight(cb.start, cb.end),
@@ -464,13 +661,13 @@ export default function WeeklyGrid({ preferences, addToast }) {
                       )
                     })}
 
-                    {/* LS class session blocks (auto from iCal, color-coded) */}
+                    {/* LS class session blocks */}
                     {lsClasses.map((ev, ei) => {
                       const lsColor = getCourseColor(ev.course_name)
                       return (
                         <div
                           key={`ls-${ei}`}
-                          className="wg-block wg-block--class"
+                          className={`wg-block wg-block--class ${isBlockPast(ev.end) ? 'wg-block--past' : ''}`}
                           style={{
                             top: blockTop(ev.start),
                             height: blockHeight(ev.start, ev.end),
@@ -485,11 +682,11 @@ export default function WeeklyGrid({ preferences, addToast }) {
                       )
                     })}
 
-                    {/* External calendar events (read-only, gray busy blocks) */}
+                    {/* External calendar events */}
                     {extEvents.map((ev, ei) => (
                       <div
                         key={`ext-${ei}`}
-                        className="wg-block wg-block--external"
+                        className={`wg-block wg-block--external ${isBlockPast(ev.end) ? 'wg-block--past' : ''}`}
                         style={{
                           top: blockTop(ev.start),
                           height: blockHeight(ev.start, ev.end),
@@ -501,29 +698,39 @@ export default function WeeklyGrid({ preferences, addToast }) {
                       </div>
                     ))}
 
-                    {/* Study blocks (draggable) */}
+                    {/* Study blocks (draggable + resizable + clickable) */}
                     {dayBlocks.map(block => {
                       const asgn = block.assignments || {}
+                      const label = block.label || asgn.title || 'Study'
+
+                      // ── Study block ───────────────────────────────────────
                       const color = getCourseColor(asgn.course_name)
                       const isDragging = draggedBlockId === block.id
                       const isCompleted = block.status === 'completed'
-                      const label = block.label || asgn.title || 'Study'
+                      const isPast = isBlockPast(block.end_time)
+                      const isResizing = resizePreview?.blockId === block.id
+                      const displayEndMin = isResizing ? resizePreview.endMin : null
+                      const startMin = getMtHourMin(block.start_time)
+                      const origEndMin = getMtHourMin(block.end_time)
+                      const durMin = (displayEndMin ?? origEndMin) - startMin
+
                       return (
                         <div
                           key={block.id}
-                          className={`wg-block wg-block--task ${isCompleted ? 'is-done' : ''} ${isDragging ? 'is-dragging' : ''}`}
+                          className={`wg-block wg-block--task ${isCompleted ? 'is-done' : ''} ${isDragging ? 'is-dragging' : ''} ${isResizing ? 'is-resizing' : ''} ${isPast ? 'wg-block--past' : ''}`}
                           style={{
                             top: blockTop(block.start_time),
-                            height: blockHeight(block.start_time, block.end_time),
+                            height: blockHeightFromMin(Math.max(15, durMin)),
                             background: color.light,
                             borderLeft: `3px solid ${color.dark}`,
                             color: color.text,
                             opacity: isDragging ? 0.4 : 1,
                           }}
-                          draggable={!isCompleted}
+                          draggable={!isCompleted && !isPast && !resizeRef.current}
                           onDragStart={e => handleDragStart(e, block.id)}
                           onDragEnd={() => setDraggedBlockId(null)}
-                          title={`${label}\n${formatTime(block.start_time)} – ${formatTime(block.end_time)}`}
+                          onClick={e => handleBlockClick(e, block, dayDateStr)}
+                          title={`${label}\n${formatTime(block.start_time)} – ${formatTime(block.end_time)}\nClick to edit • Drag to move • Drag bottom to resize`}
                         >
                           <span className="wg-block-title">{label}</span>
                           <span className="wg-block-course">{asgn.course_name}</span>
@@ -532,6 +739,13 @@ export default function WeeklyGrid({ preferences, addToast }) {
                             onClick={e => { e.stopPropagation(); handleDeleteBlock(block.id) }}
                             title="Remove block"
                           >×</button>
+                          {!isCompleted && (
+                            <div
+                              className="wg-block-resize"
+                              onPointerDown={e => handleResizeStart(e, block.id, dayDateStr)}
+                              title="Drag to resize"
+                            />
+                          )}
                         </div>
                       )
                     })}
@@ -543,27 +757,75 @@ export default function WeeklyGrid({ preferences, addToast }) {
         )}
       </div>
 
-      {/* Overbooked */}
-      {overbooked.length > 0 && (
-        <div className="wg-overbooked">
-          <span className="wg-overbooked-label">
-            ⚠ {overbooked.length} task{overbooked.length > 1 ? 's' : ''} couldn&apos;t fit this week:
-          </span>
-          <div className="wg-overbooked-tags">
-            {overbooked.map(t => (
-              <span key={t.id} className="wg-overbooked-tag">{t.title}</span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Empty state */}
-      {!loading && blocks.length === 0 && overbooked.length === 0 && (
+      {!loading && blocks.length === 0 && (
         <div className="wg-empty">
           <p>No study blocks scheduled yet.</p>
           <p className="wg-empty-hint">
-            Set time estimates on your assignments, then click <strong>Generate Plan</strong>.
+            Click <strong>Generate Plan</strong> for an AI-powered schedule, or{' '}
+            {onOpenChat && (
+              <button className="wg-empty-chat-link" onClick={() => onOpenChat('Help me build a study plan for this week. Ask me a few questions so we can make it work for me.')}>
+                chat with AI
+              </button>
+            )}
+            {!onOpenChat && 'chat with AI'} to plan collaboratively.
           </p>
+        </div>
+      )}
+
+      {/* Click-to-edit popover */}
+      {editingBlock && (
+        <div
+          ref={editPopoverRef}
+          className="wg-edit-popover"
+          style={{ left: editPopoverPos.x, top: editPopoverPos.y }}
+        >
+          <div className="wg-edit-title">{editingBlock.label}</div>
+          <div className="wg-edit-field">
+            <label className="wg-edit-label">Start time</label>
+            <input
+              type="time"
+              className="wg-edit-input"
+              value={editStartTime}
+              onChange={e => setEditStartTime(e.target.value)}
+              step={SNAP_MIN * 60}
+            />
+          </div>
+          <div className="wg-edit-field">
+            <label className="wg-edit-label">Duration</label>
+            <select
+              className="wg-edit-input"
+              value={editDurMin}
+              onChange={e => setEditDurMin(Number(e.target.value))}
+            >
+              {DURATION_OPTIONS.map(d => (
+                <option key={d} value={d}>
+                  {d < 60 ? `${d} min` : d === 60 ? '1 hour' : `${d / 60}h ${d % 60 ? `${d % 60}m` : ''}`}
+                </option>
+              ))}
+              {/* Add current duration if not in options */}
+              {!DURATION_OPTIONS.includes(editDurMin) && (
+                <option value={editDurMin}>
+                  {editDurMin < 60 ? `${editDurMin} min` : `${Math.floor(editDurMin/60)}h ${editDurMin%60 ? `${editDurMin%60}m` : ''}`}
+                </option>
+              )}
+            </select>
+          </div>
+          <div className="wg-edit-actions">
+            <button
+              className="wg-edit-save"
+              onClick={handleEditSave}
+              disabled={editSaving}
+            >
+              {editSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              className="wg-edit-cancel"
+              onClick={() => setEditingBlock(null)}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>

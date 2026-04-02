@@ -54,7 +54,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     assignments, setAssignments,
     loading, error,
     updatingIds, exitingIds,
-    lastSyncTime, setLastSyncTime,
+    lastSyncTime, setLastSyncTime, // eslint-disable-line no-unused-vars
     fetchAssignments, fetchLastSync,
     handleStatusChange, handleMarkStarted, handleMarkDone,
   } = useAssignments(addToast)
@@ -89,10 +89,12 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   const [briefing, setBriefing] = useState(null)
   const [isGeneratingAI, setIsGeneratingAI] = useState(false)
   const [planRefreshKey, setPlanRefreshKey] = useState(0)
+  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0)
   const [hasSchedule, setHasSchedule] = useState(false)
 
   const involvementLevel = preferences?.involvement_level ?? 'balanced'
   const openChatRef = useRef(null)
+  const planningMessageRef = useRef(null)   // message to pre-send when chat opens from Weekly tab
   const autoBriefingFired = useRef(false)
 
 
@@ -103,7 +105,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   useEffect(() => {
     fetchAssignments()
     fetchLastSync()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-generate briefing once per day for proactive users
   useEffect(() => {
@@ -146,7 +148,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       fetchAssignments()
     }, 2000)
     return () => clearInterval(interval)
-  }, [isSyncing])
+  }, [isSyncing]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist hideSubmitted preference
   useEffect(() => {
@@ -196,7 +198,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       const courses = data.courses_scraped || 0
       addToast(`Sync complete: ${added} new, ${updated} updated from ${courses} courses`)
     }
-  }, [addToast])
+  }, [addToast]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenDetail = useCallback((assignment) => {
     setSelectedAssignment(assignment)
@@ -207,7 +209,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       prev.map((a) => (a.id === updatedAssignment.id ? updatedAssignment : a))
     )
     addToast('Assignment updated', 'success')
-  }, [addToast])
+  }, [addToast]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Count of submitted assignments (for the toggle badge)
   const submittedCount = useMemo(() => {
@@ -315,7 +317,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
     } catch (err) {
       console.error('[Dashboard] dismiss-overdue error:', err)
     }
-  }, [addToast])
+  }, [addToast]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderTimelineGroup = (section) => {
     const items = timelineData[section.key]
@@ -595,7 +597,15 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
             {/* Weekly tab */}
             {activeTab === 'weekly' && (
               <div className="dash-full-col">
-                <WeeklyGrid preferences={preferences} addToast={addToast} />
+                <WeeklyGrid
+                  preferences={preferences}
+                  addToast={addToast}
+                  refreshKey={scheduleRefreshKey}
+                  onOpenChat={(msg) => {
+                    if (msg) planningMessageRef.current = msg
+                    openChatRef.current?.()
+                  }}
+                />
               </div>
             )}
             {/* Left: Timeline column */}
@@ -662,7 +672,11 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
         addToast={addToast}
         involvementLevel={involvementLevel}
         openChatRef={openChatRef}
-        onPlanApplied={() => setPlanRefreshKey(k => k + 1)}
+        planningMessageRef={planningMessageRef}
+        onPlanApplied={() => {
+          setPlanRefreshKey(k => k + 1)
+          setScheduleRefreshKey(k => k + 1)
+        }}
         hasSchedule={hasSchedule}
       />
 

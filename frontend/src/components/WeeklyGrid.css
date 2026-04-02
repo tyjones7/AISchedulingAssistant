@@ -90,6 +90,16 @@
 }
 .wg-btn--export:hover:not(:disabled) { background: #f9fafb; border-color: #9ca3af; }
 
+.wg-btn--chat {
+  background: #f5f3ff;
+  color: #6366f1;
+  border: 1.5px solid #c4b5fd;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.wg-btn--chat:hover:not(:disabled) { background: #ede9fe; border-color: #a78bfa; }
+
 /* Scrollable area */
 .wg-scroll {
   overflow-x: auto;
@@ -207,7 +217,7 @@
   overflow: hidden;
   box-sizing: border-box;
   cursor: default;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -237,6 +247,37 @@
 }
 
 .wg-block--task.is-dragging { cursor: grabbing; }
+
+.wg-block--task.is-resizing {
+  user-select: none;
+  cursor: row-resize;
+}
+
+/* Resize handle — invisible bottom strip that shows resize cursor on hover */
+.wg-block-resize {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  border-radius: 0 0 6px 6px;
+  /* Show a subtle grip indicator on hover */
+}
+.wg-block-resize::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 2px;
+  background: currentColor;
+  opacity: 0;
+  border-radius: 1px;
+  transition: opacity 0.15s;
+}
+.wg-block--task:hover .wg-block-resize::after { opacity: 0.35; }
 
 .wg-block-title {
   font-size: 0.7rem;
@@ -281,38 +322,31 @@
   background: rgba(99, 102, 241, 0.02);
 }
 
-/* Overbooked */
-.wg-overbooked {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 10px;
-  flex-wrap: wrap;
+/* Past blocks — desaturate and fade completed/past events */
+.wg-block--past {
+  opacity: 0.45;
+  filter: grayscale(60%);
 }
 
-.wg-overbooked-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #92400e;
-  white-space: nowrap;
+/* Current time indicator */
+.wg-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ef4444;
+  z-index: 3;
+  pointer-events: none;
 }
 
-.wg-overbooked-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.wg-overbooked-tag {
-  font-size: 0.75rem;
-  background: #fef3c7;
-  color: #78350f;
-  border-radius: 20px;
-  padding: 2px 10px;
-  border: 1px solid #fde68a;
+.wg-now-dot {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
 }
 
 /* Empty state */
@@ -328,6 +362,109 @@
   color: #9ca3af;
   margin-top: 0.5rem;
 }
+
+/* Empty state chat link */
+.wg-empty-chat-link {
+  background: none;
+  border: none;
+  color: #6366f1;
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+.wg-empty-chat-link:hover { color: #4f46e5; }
+
+/* Click-to-edit popover */
+.wg-edit-popover {
+  position: fixed;
+  z-index: 1000;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+  padding: 14px 16px;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wg-edit-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.wg-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wg-edit-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wg-edit-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 7px;
+  font-size: 0.85rem;
+  color: #111827;
+  background: #f9fafb;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.wg-edit-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  background: #fff;
+}
+
+.wg-edit-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.wg-edit-save {
+  flex: 1;
+  padding: 6px 12px;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.wg-edit-save:hover:not(:disabled) { background: #4f46e5; }
+.wg-edit-save:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.wg-edit-cancel {
+  padding: 6px 12px;
+  background: #f3f4f6;
+  color: #374151;
+  border: none;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.wg-edit-cancel:hover { background: #e5e7eb; }
 
 /* ---- Mobile ---- */
 

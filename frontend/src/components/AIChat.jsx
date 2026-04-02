@@ -7,7 +7,7 @@ const BRIEFING_DATE_KEY = 'campus-ai-briefing-date'
 
 // Chips shown when no schedule exists yet
 const CHIPS_NO_PLAN = [
-  'Build my study plan for this week',
+  'Help me plan my week — ask me questions first',
   "What's most urgent right now?",
   'How long will everything take this week?',
   'What should I work on tonight?',
@@ -15,13 +15,13 @@ const CHIPS_NO_PLAN = [
 
 // Chips shown when a schedule already exists
 const CHIPS_HAS_PLAN = [
-  'How does my week look?',
+  'Help me optimize this plan',
   "Move tonight's block to tomorrow",
   "I finished early \u2014 what's next?",
-  'I need more time for one of my courses',
+  "I'm overwhelmed — help me cut something",
 ]
 
-function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, onPlanApplied, hasSchedule = false }) {
+function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, planningMessageRef, onPlanApplied, hasSchedule = false }) {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState(() => {
     try {
@@ -42,10 +42,21 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, onPlanAp
   const inputRef = useRef(null)
   const briefingLoadedRef = useRef(false)
 
-  // Expose open() to parent via ref so ProactivePlan can open the chat
+  // Expose open() to parent via ref so ProactivePlan / WeeklyGrid can open the chat
   useEffect(() => {
     if (openChatRef) openChatRef.current = () => setIsOpen(true)
   }, [openChatRef])
+
+  // When opened from WeeklyGrid with a planning message, auto-send it once
+  useEffect(() => {
+    if (!isOpen || !planningMessageRef) return
+    const msg = planningMessageRef.current
+    if (!msg) return
+    planningMessageRef.current = null   // consume it
+    // Small delay so the panel animates in before the message sends
+    const timer = setTimeout(() => sendMessage(msg), 300)
+    return () => clearTimeout(timer)
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist conversation to localStorage on every change
   useEffect(() => {
