@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { authFetch, API_BASE } from '../lib/api'
+import { renderMarkdown } from '../utils/renderMarkdown'
 import './AIChat.css'
 
 const STORAGE_KEY = 'campus-ai-chat'
@@ -314,70 +315,6 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, planning
     } finally {
       setIsSavingContext(false)
     }
-  }
-
-  // Parse inline markdown: **bold**, *italic*, `code`
-  const parseInline = (text) => {
-    const parts = []
-    const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g
-    let last = 0
-    let m
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > last) parts.push(text.slice(last, m.index))
-      if (m[2] !== undefined) parts.push(<strong key={m.index}>{m[2]}</strong>)
-      else if (m[3] !== undefined) parts.push(<em key={m.index}>{m[3]}</em>)
-      else if (m[4] !== undefined) parts.push(<code key={m.index} className="ai-inline-code">{m[4]}</code>)
-      last = m.index + m[0].length
-    }
-    if (last < text.length) parts.push(text.slice(last))
-    return parts
-  }
-
-  // Render markdown text as React elements (paragraphs, bullets, numbered lists)
-  const renderMarkdown = (text) => {
-    const lines = text.split('\n')
-    const elements = []
-    let i = 0
-
-    while (i < lines.length) {
-      const line = lines[i]
-
-      // Blank line — skip
-      if (line.trim() === '') { i++; continue }
-
-      // Bullet list item: starts with - or * (not **)
-      if (/^[\s]*[-•]\s/.test(line)) {
-        const items = []
-        while (i < lines.length && /^[\s]*[-•]\s/.test(lines[i])) {
-          items.push(<li key={i}>{parseInline(lines[i].replace(/^[\s]*[-•]\s/, ''))}</li>)
-          i++
-        }
-        elements.push(<ul key={`ul-${i}`} className="ai-md-list">{items}</ul>)
-        continue
-      }
-
-      // Numbered list item: starts with 1. 2. etc.
-      if (/^[\s]*\d+\.\s/.test(line)) {
-        const items = []
-        while (i < lines.length && /^[\s]*\d+\.\s/.test(lines[i])) {
-          items.push(<li key={i}>{parseInline(lines[i].replace(/^[\s]*\d+\.\s/, ''))}</li>)
-          i++
-        }
-        elements.push(<ol key={`ol-${i}`} className="ai-md-list">{items}</ol>)
-        continue
-      }
-
-      // Regular paragraph (group consecutive non-blank, non-list lines)
-      const paraLines = []
-      while (i < lines.length && lines[i].trim() !== '' && !/^[\s]*[-•\d]/.test(lines[i])) {
-        paraLines.push(lines[i])
-        i++
-      }
-      if (paraLines.length > 0) {
-        elements.push(<p key={`p-${i}`} className="ai-md-para">{parseInline(paraLines.join(' '))}</p>)
-      }
-    }
-    return elements
   }
 
   // Render a single message bubble (with optional streaming cursor)

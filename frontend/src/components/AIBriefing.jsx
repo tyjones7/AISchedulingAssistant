@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { renderMarkdown } from '../utils/renderMarkdown'
 import './AIBriefing.css'
 
 function AIBriefing({ briefing, isGenerating }) {
@@ -53,7 +54,7 @@ function AIBriefing({ briefing, isGenerating }) {
               <div className="skeleton-line short" />
             </div>
           ) : (
-            <p className="ai-briefing-text">{briefing}</p>
+            <div className="ai-briefing-text">{renderMarkdown(briefing) || briefing}</div>
           )}
         </div>
       )}
