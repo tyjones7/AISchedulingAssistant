@@ -642,9 +642,7 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
 
           <div className="survey-footer">
             <button className="survey-back" onClick={goBack}>Back</button>
-            <button className="survey-skip" onClick={goNext}>
-              {classSchedule.length > 0 ? 'Done' : 'Skip for now'}
-            </button>
+            <button className="survey-skip" onClick={goNext}>Skip for now</button>
             {classSchedule.length > 0 && (
               <button className="survey-next" onClick={goNext}>Continue</button>
             )}
