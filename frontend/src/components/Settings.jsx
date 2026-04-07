@@ -484,15 +484,28 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     }
   }
 
+  const prefsDirty = preferences && (
+    studyTime !== (preferences.study_time || 'evening') ||
+    Number(sessionLength) !== (preferences.session_length_minutes || 60) ||
+    Number(advanceDays) !== (preferences.advance_days ?? 1) ||
+    workStyle !== (preferences.work_style || 'spread_out') ||
+    involvementLevel !== (preferences.involvement_level || 'balanced')
+  )
+
+  const confirmClose = () => {
+    if (prefsDirty && !window.confirm('You have unsaved preference changes. Close without saving?')) return
+    onClose?.()
+  }
+
   // Close on escape key
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    const onKey = (e) => { if (e.key === 'Escape') confirmClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, prefsDirty]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBackdrop = (e) => {
-    if (e.target === e.currentTarget) onClose?.()
+    if (e.target === e.currentTarget) confirmClose()
   }
 
   return (
@@ -501,7 +514,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
         {/* Header */}
         <div className="settings-header">
           <h2 className="settings-title">Settings</h2>
-          <button className="settings-close" onClick={onClose} aria-label="Close settings">
+          <button className="settings-close" onClick={confirmClose} aria-label="Close settings">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />

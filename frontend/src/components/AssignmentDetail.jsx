@@ -122,20 +122,32 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
     }
   }
 
+  const isDirty =
+    status !== (assignment?.status || 'not_started') ||
+    String(estimatedMinutes) !== String(assignment?.estimated_minutes || '') ||
+    notes !== (assignment?.notes || '') ||
+    (assignment?.source === 'manual' && (
+      editTitle !== (assignment?.title || '') ||
+      editCourse !== (assignment?.course_name || '')
+    ))
+
+  const confirmClose = () => {
+    if (isDirty && !window.confirm('You have unsaved changes. Close without saving?')) return
+    onClose()
+  }
+
   const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget) {
-      onClose()
-    }
+    if (e.target === e.currentTarget) confirmClose()
   }
 
   // Handle escape key
   useEffect(() => {
     const handleEscape = (e) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') confirmClose()
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [onClose])
+  }, [isDirty]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!assignment) return null
 
@@ -148,7 +160,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
             <span className="course-badge-lg">{assignment.course_name}</span>
             <h2 className="modal-title">{assignment.title}</h2>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
+          <button className="modal-close" onClick={confirmClose} aria-label="Close">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -383,7 +395,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
           {saveError && (
             <span className="modal-save-error">{saveError}</span>
           )}
-          <button className="btn btn-ghost" onClick={onClose}>
+          <button className="btn btn-ghost" onClick={confirmClose}>
             Cancel
           </button>
           <button

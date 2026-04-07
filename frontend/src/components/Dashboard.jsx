@@ -541,7 +541,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
                 </span>
                 <span className="sync-progress-detail">
                   {syncStatus.total_courses > 0
-                    ? (syncStatus.current_course_name || 'Processing...')
+                    ? `Course ${syncStatus.current_course} of ${syncStatus.total_courses}${syncStatus.current_course_name ? ` · ${syncStatus.current_course_name}` : ''}`
                     : (syncStatus.message || 'Starting sync...')}
                 </span>
               </div>
