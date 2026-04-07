@@ -100,6 +100,7 @@
   color: var(--color-text-secondary);
   line-height: var(--leading-relaxed);
   margin: 0;
+  white-space: normal;
 }
 
 /* Markdown elements rendered inside the briefing */
