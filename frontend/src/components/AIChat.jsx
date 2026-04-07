@@ -316,6 +316,70 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, planning
     }
   }
 
+  // Parse inline markdown: **bold**, *italic*, `code`
+  const parseInline = (text) => {
+    const parts = []
+    const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g
+    let last = 0
+    let m
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) parts.push(text.slice(last, m.index))
+      if (m[2] !== undefined) parts.push(<strong key={m.index}>{m[2]}</strong>)
+      else if (m[3] !== undefined) parts.push(<em key={m.index}>{m[3]}</em>)
+      else if (m[4] !== undefined) parts.push(<code key={m.index} className="ai-inline-code">{m[4]}</code>)
+      last = m.index + m[0].length
+    }
+    if (last < text.length) parts.push(text.slice(last))
+    return parts
+  }
+
+  // Render markdown text as React elements (paragraphs, bullets, numbered lists)
+  const renderMarkdown = (text) => {
+    const lines = text.split('\n')
+    const elements = []
+    let i = 0
+
+    while (i < lines.length) {
+      const line = lines[i]
+
+      // Blank line — skip
+      if (line.trim() === '') { i++; continue }
+
+      // Bullet list item: starts with - or * (not **)
+      if (/^[\s]*[-•]\s/.test(line)) {
+        const items = []
+        while (i < lines.length && /^[\s]*[-•]\s/.test(lines[i])) {
+          items.push(<li key={i}>{parseInline(lines[i].replace(/^[\s]*[-•]\s/, ''))}</li>)
+          i++
+        }
+        elements.push(<ul key={`ul-${i}`} className="ai-md-list">{items}</ul>)
+        continue
+      }
+
+      // Numbered list item: starts with 1. 2. etc.
+      if (/^[\s]*\d+\.\s/.test(line)) {
+        const items = []
+        while (i < lines.length && /^[\s]*\d+\.\s/.test(lines[i])) {
+          items.push(<li key={i}>{parseInline(lines[i].replace(/^[\s]*\d+\.\s/, ''))}</li>)
+          i++
+        }
+        elements.push(<ol key={`ol-${i}`} className="ai-md-list">{items}</ol>)
+        continue
+      }
+
+      // Regular paragraph (group consecutive non-blank, non-list lines)
+      const paraLines = []
+      while (i < lines.length && lines[i].trim() !== '' && !/^[\s]*[-•\d]/.test(lines[i])) {
+        paraLines.push(lines[i])
+        i++
+      }
+      if (paraLines.length > 0) {
+        elements.push(<p key={`p-${i}`} className="ai-md-para">{parseInline(paraLines.join(' '))}</p>)
+      }
+    }
+    return elements
+  }
+
   // Render a single message bubble (with optional streaming cursor)
   const renderBubble = (msg, i) => {
     const isLastAssistant =
@@ -329,7 +393,10 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, planning
 
     return (
       <div key={i} className={`ai-chat-bubble ai-bubble-${msg.role}`}>
-        {displayContent}
+        {msg.role === 'assistant' && displayContent
+          ? renderMarkdown(displayContent)
+          : displayContent
+        }
         {isLastAssistant && displayContent.length === 0 && (
           // Still empty — show typing dots instead of cursor
           <span className="ai-typing-dots">
@@ -390,8 +457,11 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, planning
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="1 4 1 10 7 10" />
-                    <path d="M3.51 15a9 9 0 1 0 .49-3.69" />
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6" />
+                    <path d="M14 11v6" />
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
                   </svg>
                 </button>
               )}

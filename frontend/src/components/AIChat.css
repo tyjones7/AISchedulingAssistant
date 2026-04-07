@@ -253,6 +253,27 @@
   border-bottom-left-radius: var(--radius-sm);
 }
 
+/* Markdown rendering inside assistant bubbles */
+.ai-md-para {
+  margin: 0 0 0.45em 0;
+}
+.ai-md-para:last-child { margin-bottom: 0; }
+
+.ai-md-list {
+  margin: 0.2em 0 0.45em 0;
+  padding-left: 1.2em;
+}
+.ai-md-list:last-child { margin-bottom: 0; }
+.ai-md-list li { margin-bottom: 0.15em; }
+
+.ai-inline-code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8em;
+  background: rgba(0,0,0,0.07);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
 /* Streaming cursor */
 .ai-streaming-cursor {
   display: inline-block;
