@@ -109,6 +109,24 @@ function minToTimeStr(totalMin) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+// Assign non-overlapping columns to blocks that share the same time slot.
+// Returns [{block, col, totalCols}, ...] so each block can be sized/offset correctly.
+function computeLayout(blocks) {
+  const sorted = [...blocks].sort((a, b) => getMtHourMin(a.start_time) - getMtHourMin(b.start_time))
+  const columns = [] // endMin of last block placed in each column
+  const layout = []
+  for (const block of sorted) {
+    const startMin = getMtHourMin(block.start_time)
+    const endMin = getMtHourMin(block.end_time)
+    let col = columns.findIndex(colEnd => colEnd <= startMin)
+    if (col === -1) { col = columns.length; columns.push(endMin) }
+    else columns[col] = endMin
+    layout.push({ block, col })
+  }
+  const totalCols = Math.max(1, columns.length)
+  return layout.map(item => ({ ...item, totalCols }))
+}
+
 function getWeekStart(d) {
   const dowStr = d.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short' })
   const dowIndex = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(dowStr)
@@ -404,7 +422,7 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
 
     // Position popover near click, keeping in viewport
     const x = Math.min(e.clientX + 12, window.innerWidth - 260)
-    const y = Math.min(e.clientY - 10, window.innerHeight - 220)
+    const y = Math.min(Math.max(8, e.clientY - 10), window.innerHeight - 280)
     setEditPopoverPos({ x, y })
   }
 
@@ -699,7 +717,7 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
                     ))}
 
                     {/* Study blocks (draggable + resizable + clickable) */}
-                    {dayBlocks.map(block => {
+                    {computeLayout(dayBlocks).map(({ block, col, totalCols }) => {
                       const asgn = block.assignments || {}
                       const label = block.label || asgn.title || 'Study'
 
@@ -713,6 +731,8 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
                       const startMin = getMtHourMin(block.start_time)
                       const origEndMin = getMtHourMin(block.end_time)
                       const durMin = (displayEndMin ?? origEndMin) - startMin
+                      const colWidth = `${100 / totalCols}%`
+                      const colLeft = `${(col / totalCols) * 100}%`
 
                       return (
                         <div
@@ -721,6 +741,8 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
                           style={{
                             top: blockTop(block.start_time),
                             height: blockHeightFromMin(Math.max(15, durMin)),
+                            width: colWidth,
+                            left: colLeft,
                             background: color.light,
                             borderLeft: `3px solid ${color.dark}`,
                             color: color.text,

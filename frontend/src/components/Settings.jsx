@@ -221,7 +221,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       await authFetch(`${API_BASE}/ls-feeds/${feedId}`, { method: 'DELETE' })
       setIcalFeeds(prev => prev.filter(f => f.id !== feedId))
     } catch {
-      // ignore
+      setIcalError('Failed to remove feed. Please try again.')
     }
   }
 
@@ -281,7 +281,9 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     try {
       await authFetch(`${API_BASE}/external-calendars/${calId}`, { method: 'DELETE' })
       setExtCalendars(prev => prev.filter(c => c.id !== calId))
-    } catch { /* ignore */ }
+    } catch {
+      setExtCalError('Failed to remove calendar. Please try again.')
+    }
   }
 
   const openReview = async (feedId, courseName) => {
@@ -307,8 +309,11 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     ))
   }
 
+  const [reviewError, setReviewError] = useState(null)
+
   const handleConfirmReview = async () => {
     setReviewSaving(true)
+    setReviewError(null)
     try {
       const res = await authFetch(`${API_BASE}/ls-feeds/${reviewFeedId}/confirm-classifications`, {
         method: 'POST',
@@ -318,8 +323,12 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
         setFeedPendingCounts(prev => { const n = { ...prev }; delete n[reviewFeedId]; return n })
         setReviewFeedId(null)
         setReviewItems([])
+      } else {
+        setReviewError('Failed to save changes. Please try again.')
       }
-    } catch { /**/ } finally {
+    } catch {
+      setReviewError('Failed to save changes. Please try again.')
+    } finally {
       setReviewSaving(false)
     }
   }
@@ -395,8 +404,13 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
       if (res.ok) {
         setContextSaved(true)
         setTimeout(() => setContextSaved(false), 2500)
+      } else {
+        throw new Error('save failed')
       }
-    } catch { /* ignore */ } finally {
+    } catch {
+      setContextSaved('error')
+      setTimeout(() => setContextSaved(false), 3000)
+    } finally {
       setContextSaving(false)
     }
   }
@@ -677,6 +691,8 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                 </div>
               </div>
             ) : (
+              <>
+                {icalError && <p className="settings-error" style={{ marginBottom: '8px' }}>{icalError}</p>}
               <div className="ical-actions">
                 <button className="settings-secondary-btn" onClick={() => { setShowIcalAdd(true); setIcalError(null) }}>
                   + Add iCal feed
@@ -689,6 +705,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                   >{icalSyncing ? 'Syncing...' : 'Sync Now'}</button>
                 )}
               </div>
+              </>
             )}
 
             {icalSyncResult && <p className="settings-hint" style={{ color: '#1a7a35', marginTop: '8px' }}>{icalSyncResult}</p>}
@@ -722,6 +739,10 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                   </div>
                 ))}
               </div>
+            )}
+
+            {!showExtCalAdd && extCalError && (
+              <p className="settings-error" style={{ marginBottom: '8px' }}>{extCalError}</p>
             )}
 
             {showExtCalAdd ? (
@@ -1079,7 +1100,8 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
               maxLength={2000}
             />
             <div className="settings-save-row">
-              {contextSaved && <span className="settings-saved-msg">Saved!</span>}
+              {contextSaved === true && <span className="settings-saved-msg">Saved!</span>}
+              {contextSaved === 'error' && <span className="settings-error" style={{ marginRight: 'auto' }}>Failed to save. Try again.</span>}
               <span className="settings-hint" style={{ flex: 1 }}>
                 {studentContext.length}/2000 characters
               </span>
@@ -1176,6 +1198,7 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                     <span className="review-summary-sep">·</span>
                     <span className="review-summary-hidden">{reviewItems.filter(i => i.content_type === 'course_content').length} hidden</span>
                   </div>
+                  {reviewError && <p className="settings-error" style={{ margin: '0 0 8px' }}>{reviewError}</p>}
                   <div className="review-footer-actions">
                     <button
                       className="review-hide-all-btn"
