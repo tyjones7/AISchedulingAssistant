@@ -22,9 +22,9 @@ function AIBriefing({ briefing, isGenerating }) {
       >
         <div className="ai-briefing-left">
           <span className="ai-briefing-icon" aria-hidden="true">✦</span>
-          <span className="ai-briefing-label">Today&apos;s AI Plan</span>
+          <span className="ai-briefing-label">Daily Briefing</span>
           {!isGenerating && !briefing && (
-            <span className="ai-briefing-hint">Click &ldquo;AI Plan&rdquo; to generate</span>
+            <span className="ai-briefing-hint">Click &ldquo;Daily Brief&rdquo; to generate</span>
           )}
           {isGenerating && (
             <span className="ai-briefing-hint is-generating">Generating&hellip;</span>

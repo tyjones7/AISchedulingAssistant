@@ -147,8 +147,8 @@ function App() {
       if (lsFeedsAdded) {
         authFetch(`${API_BASE}/ls-feeds/sync`, { method: 'POST' }).catch(() => {})
       }
-      // Trigger Canvas sync via the existing autoSync → SyncButton path,
-      // but only if we haven't synced recently
+      // Trigger full sync via the existing autoSync → SyncButton path,
+      // but only if we haven't synced recently. Works for both Canvas and LS-only users.
       try {
         const res = await authFetch(`${API_BASE}/sync/last`)
         if (res.ok) {
@@ -160,7 +160,7 @@ function App() {
           }
         }
       } catch { /* proceed with sync */ }
-      if (connected) setShouldSync(true)
+      setShouldSync(true)
     }
   }
 

@@ -217,7 +217,7 @@ function AssignmentCard({
         )}
         {assignment.source && assignment.source !== 'canvas' && (
           <span className="source-badge source-manual">
-            {assignment.source === 'manual' ? 'Manual' : assignment.source.toUpperCase()}
+            {assignment.source === 'manual' ? 'Manual' : assignment.source === 'learning_suite' ? 'LS' : assignment.source.toUpperCase()}
           </span>
         )}
         <span className={`card-status status-${assignment.status}`}>

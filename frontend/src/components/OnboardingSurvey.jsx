@@ -397,7 +397,9 @@ export default function OnboardingSurvey({ onComplete, isCanvasConnected }) {
       try {
         await authFetch(`${API_BASE}/ls-feeds/${feedId}`, { method: 'DELETE' })
         setLsFeeds(prev => prev.filter(f => f.id !== feedId))
-      } catch { /* ignore */ }
+      } catch {
+        setLsError('Failed to remove feed. Please try again.')
+      }
     }
 
     return (

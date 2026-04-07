@@ -311,12 +311,12 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   const handleDismissOverdue = useCallback(async () => {
     try {
       const res = await authFetch(`${API_BASE}/assignments/dismiss-overdue`, { method: 'POST' })
-      if (!res.ok) return
+      if (!res.ok) { addToast('Failed to mark overdue items. Try again.', 'error'); return }
       const data = await res.json()
       fetchAssignments()
-      if (data.dismissed > 0) addToast(`Marked ${data.dismissed} overdue items as done`)
-    } catch (err) {
-      console.error('[Dashboard] dismiss-overdue error:', err)
+      if (data.dismissed > 0) addToast(`Marked ${data.dismissed} overdue item${data.dismissed !== 1 ? 's' : ''} as done`)
+    } catch {
+      addToast('Failed to mark overdue items. Check your connection.', 'error')
     }
   }, [addToast]) // eslint-disable-line react-hooks/exhaustive-deps
 
