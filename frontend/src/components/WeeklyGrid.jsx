@@ -112,19 +112,43 @@ function minToTimeStr(totalMin) {
 // Assign non-overlapping columns to blocks that share the same time slot.
 // Returns [{block, col, totalCols}, ...] so each block can be sized/offset correctly.
 function computeLayout(blocks) {
+  if (blocks.length === 0) return []
   const sorted = [...blocks].sort((a, b) => getMtHourMin(a.start_time) - getMtHourMin(b.start_time))
-  const columns = [] // endMin of last block placed in each column
-  const layout = []
-  for (const block of sorted) {
-    const startMin = getMtHourMin(block.start_time)
-    const endMin = getMtHourMin(block.end_time)
-    let col = columns.findIndex(colEnd => colEnd <= startMin)
-    if (col === -1) { col = columns.length; columns.push(endMin) }
-    else columns[col] = endMin
-    layout.push({ block, col })
+
+  // Group into clusters of overlapping blocks so non-overlapping blocks stay full-width
+  const groups = []
+  let group = [sorted[0]]
+  let groupEnd = getMtHourMin(sorted[0].end_time)
+  for (let i = 1; i < sorted.length; i++) {
+    const startMin = getMtHourMin(sorted[i].start_time)
+    if (startMin < groupEnd) {
+      group.push(sorted[i])
+      groupEnd = Math.max(groupEnd, getMtHourMin(sorted[i].end_time))
+    } else {
+      groups.push(group)
+      group = [sorted[i]]
+      groupEnd = getMtHourMin(sorted[i].end_time)
+    }
   }
-  const totalCols = Math.max(1, columns.length)
-  return layout.map(item => ({ ...item, totalCols }))
+  groups.push(group)
+
+  // Assign columns within each group independently
+  const layout = []
+  for (const g of groups) {
+    const cols = []
+    const gLayout = []
+    for (const block of g) {
+      const startMin = getMtHourMin(block.start_time)
+      const endMin = getMtHourMin(block.end_time)
+      let col = cols.findIndex(colEnd => colEnd <= startMin)
+      if (col === -1) { col = cols.length; cols.push(endMin) }
+      else cols[col] = endMin
+      gLayout.push({ block, col })
+    }
+    const totalCols = Math.max(1, cols.length)
+    layout.push(...gLayout.map(item => ({ ...item, totalCols })))
+  }
+  return layout
 }
 
 function getWeekStart(d) {
