@@ -154,6 +154,7 @@ function getMtCurrentMin() {
 }
 
 export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshKey = 0 }) {
+  const [dragOverDay, setDragOverDay] = useState(null)   // dayDateStr of the column being dragged over
   const [blocks, setBlocks] = useState([])
   const [externalEvents, setExternalEvents] = useState([])
   const [lsClassEvents, setLsClassEvents] = useState([])
@@ -341,6 +342,15 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
     e.dataTransfer.effectAllowed = 'move'
   }
 
+  const handleDragEnter = (dayDateStr) => {
+    if (draggedBlockId) setDragOverDay(dayDateStr)
+  }
+
+  const handleDragLeave = (e) => {
+    // Only clear if leaving the column entirely (not entering a child element)
+    if (!e.currentTarget.contains(e.relatedTarget)) setDragOverDay(null)
+  }
+
   const handleDrop = async (e, dayDateStr, pixelY) => {
     e.preventDefault()
     if (!draggedBlockId) return
@@ -387,6 +397,7 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
       addToast('Failed to move block', 'error')
     }
     setDraggedBlockId(null)
+    setDragOverDay(null)
   }
 
   const handleDeleteBlock = async (blockId) => {
@@ -633,9 +644,11 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
                   </div>
 
                   <div
-                    className="wg-day-body"
+                    className={`wg-day-body ${dragOverDay === dayDateStr && draggedBlockId ? 'wg-drop-target' : ''}`}
                     style={{ height: GRID_HEIGHT }}
                     onDragOver={e => e.preventDefault()}
+                    onDragEnter={() => handleDragEnter(dayDateStr)}
+                    onDragLeave={handleDragLeave}
                     onDrop={e => {
                       const rect = e.currentTarget.getBoundingClientRect()
                       const pixelY = Math.max(0, e.clientY - rect.top)
@@ -786,7 +799,7 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
       {/* Empty state */}
       {!loading && blocks.length === 0 && (
         <div className="wg-empty">
-          <p>No study blocks scheduled yet.</p>
+          <p>{weekStartStr > todayStr ? 'No blocks scheduled for this week yet.' : 'No study blocks scheduled yet.'}</p>
           <p className="wg-empty-hint">
             Click <strong>Generate Plan</strong> for an AI-powered schedule, or{' '}
             {onOpenChat && (
