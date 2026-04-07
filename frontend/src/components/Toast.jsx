@@ -15,6 +15,7 @@ function Toast({ message, type = 'success', onClose, duration = 3000 }) {
       <span className="toast-icon">
         {type === 'success' && '✓'}
         {type === 'error' && '✕'}
+        {type === 'info' && 'ℹ'}
       </span>
       <span className="toast-message">{message}</span>
     </div>

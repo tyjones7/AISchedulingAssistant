@@ -303,7 +303,11 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
       const res = await authFetch(`${API_BASE}/schedule/generate`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
-        addToast(`Generated ${data.total_blocks} study blocks`, 'success')
+        if (data.total_blocks > 0) {
+          addToast(`Generated ${data.total_blocks} study block${data.total_blocks !== 1 ? 's' : ''}`, 'success')
+        } else {
+          addToast('No assignments due this week — nothing to schedule.', 'info')
+        }
         // Refetch full week from DB (includes past blocks that weren't deleted)
         await fetchWeek()
       } else {

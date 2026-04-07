@@ -34,6 +34,15 @@
   border-left: 3px solid var(--color-error-500);
 }
 
+.toast-info {
+  border-left: 3px solid #64748b;
+}
+
+.toast-info .toast-icon {
+  background: #f1f5f9;
+  color: #475569;
+}
+
 .toast-icon {
   width: 20px;
   height: 20px;

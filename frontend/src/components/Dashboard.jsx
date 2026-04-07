@@ -166,12 +166,13 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   const handleGenerateAI = useCallback(async () => {
     if (isGeneratingAI) return
     setIsGeneratingAI(true)
+    setActiveTab('timeline') // briefing shows in the timeline sidebar
     try {
       const res = await authFetch(`${API_BASE}/ai/briefing/generate`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
         setBriefing(data.briefing || null)
-        addToast('Briefing generated!', 'success')
+        addToast('Daily briefing ready!', 'success')
       } else {
         addToast('Briefing generation failed. Make sure GROQ_API_KEY is set.', 'error')
       }
@@ -494,7 +495,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               className="ai-plan-btn"
               onClick={handleGenerateAI}
               disabled={isGeneratingAI}
-              title="Generate AI study plan"
+              title="Generate today's AI briefing"
             >
               {isGeneratingAI ? (
                 <span className="ai-plan-spinner" aria-hidden="true" />
@@ -503,7 +504,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
                   <path d="M12 3l1.88 5.76a1 1 0 0 0 .95.69h6.06l-4.9 3.56a1 1 0 0 0-.36 1.12L17.5 20l-4.9-3.56a1 1 0 0 0-1.18 0L6.5 20l1.87-5.87a1 1 0 0 0-.36-1.12L3.11 9.45h6.06a1 1 0 0 0 .95-.69L12 3z" />
                 </svg>
               )}
-              <span>AI Plan</span>
+              <span>Daily Brief</span>
             </button>
             {submittedCount > 0 && (
               <button
@@ -575,7 +576,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
               </svg>
             </div>
             <h2 className="onboarding-heading">Your courses aren&apos;t synced yet</h2>
-            <p className="onboarding-desc">Sync your Canvas courses to see all your assignments in one place.</p>
+            <p className="onboarding-desc">Sync your courses to see all your assignments in one place.</p>
             <button
               className="btn btn-primary onboarding-sync-btn"
               onClick={() => setTriggerSync(true)}
@@ -639,7 +640,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
                     </svg>
                   </div>
                   <h3 className="empty-state-title">No assignments found</h3>
-                  <p className="empty-state-desc">Try syncing again or check your Canvas courses.</p>
+                  <p className="empty-state-desc">Try syncing again or check your course connections in Settings.</p>
                 </div>
               )}
             </div>}
