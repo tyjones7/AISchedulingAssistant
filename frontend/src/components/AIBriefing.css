@@ -100,8 +100,20 @@
   color: var(--color-text-secondary);
   line-height: var(--leading-relaxed);
   margin: 0;
-  white-space: pre-line;
 }
+
+/* Markdown elements rendered inside the briefing */
+.ai-briefing-text .ai-md-para {
+  margin: 0 0 0.45em 0;
+}
+.ai-briefing-text .ai-md-para:last-child { margin-bottom: 0; }
+
+.ai-briefing-text .ai-md-list {
+  margin: 0.2em 0 0.45em 0;
+  padding-left: 1.2em;
+}
+.ai-briefing-text .ai-md-list:last-child { margin-bottom: 0; }
+.ai-briefing-text .ai-md-list li { margin-bottom: 0.15em; }
 
 /* ---- Skeleton loading ---- */
 
