@@ -108,6 +108,21 @@
   margin-top: 0.4rem;
 }
 
+.today-generate-btn {
+  margin-top: 1rem;
+  padding: 0.5rem 1.25rem;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.today-generate-btn:hover:not(:disabled) { background: #4f46e5; }
+.today-generate-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
 /* Block list */
 .today-block-list {
   display: flex;

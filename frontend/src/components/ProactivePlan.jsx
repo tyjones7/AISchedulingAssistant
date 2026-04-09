@@ -282,7 +282,12 @@ export default function ProactivePlan({
                 title="Regenerate plan"
                 aria-label="Regenerate plan"
               >
-                ↺
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  width="14" height="14">
+                  <polyline points="1 4 1 10 7 10" />
+                  <path d="M3.51 15a9 9 0 1 0 .49-4.5" />
+                </svg>
               </button>
             </div>
           )}

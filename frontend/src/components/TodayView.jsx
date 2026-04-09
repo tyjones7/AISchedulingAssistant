@@ -26,15 +26,17 @@ function formatTime(isoStr) {
   })
 }
 
-export default function TodayView({ assignments = [], addToast }) {
+export default function TodayView({ assignments = [], addToast, refreshKey = 0 }) {
   const [blocks, setBlocks] = useState([])
   const [loading, setLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
 
   useEffect(() => {
     fetchToday()
-  }, [])
+  }, [refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchToday = async () => {
+    setLoading(true)
     try {
       const res = await authFetch(`${API_BASE}/schedule/week`)
       if (res.ok) {
@@ -45,10 +47,27 @@ export default function TodayView({ assignments = [], addToast }) {
           .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
         setBlocks(todayBlocks)
       }
-    } catch (e) {
-      console.error(e)
+    } catch {
+      /* ignore */
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const res = await authFetch(`${API_BASE}/schedule/generate`, { method: 'POST' })
+      if (res.ok) {
+        addToast('Plan generated!', 'success')
+        await fetchToday()
+      } else {
+        addToast('Failed to generate plan.', 'error')
+      }
+    } catch {
+      addToast('Failed to generate plan.', 'error')
+    } finally {
+      setGenerating(false)
     }
   }
 
@@ -116,7 +135,13 @@ export default function TodayView({ assignments = [], addToast }) {
         ) : blocks.length === 0 ? (
           <div className="today-empty">
             <p>No study blocks scheduled for today.</p>
-            <p className="today-empty-hint">Switch to the Weekly view to generate a plan.</p>
+            <button
+              className="today-generate-btn"
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              {generating ? 'Generating…' : 'Generate plan'}
+            </button>
           </div>
         ) : (
           <div className="today-block-list">
@@ -138,7 +163,7 @@ export default function TodayView({ assignments = [], addToast }) {
                       {formatTime(block.start_time)} – {formatTime(block.end_time)}
                       <span className="today-block-dur">{durMin} min</span>
                     </div>
-                    <div className="today-block-title">{asgn.title || 'Study block'}</div>
+                    <div className="today-block-title">{block.label || asgn.title || 'Study block'}</div>
                     <div className="today-block-course">{asgn.course_name}</div>
                   </div>
 

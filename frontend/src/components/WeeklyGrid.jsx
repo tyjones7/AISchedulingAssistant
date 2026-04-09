@@ -314,8 +314,8 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
         const lsData = await lsRes.json()
         setLsClassEvents(lsData.events || [])
       }
-    } catch (e) {
-      console.error(e)
+    } catch {
+      /* ignore */
     } finally {
       setLoading(false)
     }

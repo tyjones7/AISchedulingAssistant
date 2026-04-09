@@ -90,7 +90,22 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
   const [isGeneratingAI, setIsGeneratingAI] = useState(false)
   const [planRefreshKey, setPlanRefreshKey] = useState(0)
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0)
+  const [todayRefreshKey, setTodayRefreshKey] = useState(0)
   const [hasSchedule, setHasSchedule] = useState(false)
+
+  const prevTabRef = useRef(null)
+
+  // Refresh TodayView when switching to today tab or when schedule is regenerated
+  useEffect(() => {
+    if (activeTab === 'today' && prevTabRef.current !== 'today') {
+      setTodayRefreshKey(k => k + 1)
+    }
+    prevTabRef.current = activeTab
+  }, [activeTab])
+
+  useEffect(() => {
+    setTodayRefreshKey(k => k + 1)
+  }, [scheduleRefreshKey])
 
   const involvementLevel = preferences?.involvement_level ?? 'balanced'
   const openChatRef = useRef(null)
@@ -592,7 +607,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
             {/* Today tab */}
             {activeTab === 'today' && (
               <div className="dash-full-col">
-                <TodayView assignments={assignments} addToast={addToast} />
+                <TodayView assignments={assignments} addToast={addToast} refreshKey={todayRefreshKey} />
               </div>
             )}
             {/* Weekly tab */}
