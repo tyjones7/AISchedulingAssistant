@@ -69,20 +69,6 @@
 }
 .wg-btn--generate:hover:not(:disabled) { background: #4f46e5; }
 
-.wg-btn--approve {
-  background: #fff;
-  color: #6366f1;
-  border: 1.5px solid #6366f1;
-}
-.wg-btn--approve:hover:not(:disabled) { background: #eef2ff; }
-
-.wg-btn--approved {
-  background: #f0fdf4;
-  color: #16a34a;
-  border: 1.5px solid #86efac;
-  cursor: default;
-}
-
 .wg-btn--export {
   background: #fff;
   color: #6b7280;

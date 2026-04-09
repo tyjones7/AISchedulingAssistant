@@ -184,8 +184,6 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
   const [lsClassEvents, setLsClassEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [approved, setApproved] = useState(false)
-  const [approving, setApproving] = useState(false)
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()))
   const [draggedBlockId, setDraggedBlockId] = useState(null)
   const [exporting, setExporting] = useState(false)
@@ -323,7 +321,6 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
 
   const handleGenerate = async () => {
     setGenerating(true)
-    setApproved(false)
     try {
       const res = await authFetch(`${API_BASE}/schedule/generate`, { method: 'POST' })
       if (res.ok) {
@@ -342,21 +339,6 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
       addToast('Failed to generate schedule', 'error')
     } finally {
       setGenerating(false)
-    }
-  }
-
-  const handleApprove = async () => {
-    setApproving(true)
-    try {
-      const res = await authFetch(`${API_BASE}/schedule/approve`, { method: 'POST' })
-      if (res.ok) {
-        setApproved(true)
-        addToast('Plan approved!', 'success')
-      }
-    } catch {
-      addToast('Failed to approve plan', 'error')
-    } finally {
-      setApproving(false)
     }
   }
 
@@ -413,7 +395,6 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
         setBlocks(prev => prev.map(b =>
           b.id === draggedBlockId ? { ...b, ...data.block, date: dayDateStr } : b
         ))
-        setApproved(false)
       } else {
         addToast('Failed to move block', 'error')
       }
@@ -487,7 +468,6 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
         const data = await res.json()
         setBlocks(prev => prev.map(b => b.id === id ? { ...b, ...data.block, date: dayDateStr } : b))
         setEditingBlock(null)
-        setApproved(false)
       } else {
         addToast('Failed to update block', 'error')
       }
@@ -583,44 +563,35 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
             </button>
           )}
           {blocks.length > 0 && (
-            <>
-              <button
-                className={`wg-btn ${approved ? 'wg-btn--approved' : 'wg-btn--approve'}`}
-                onClick={handleApprove}
-                disabled={approving || approved}
-              >
-                {approved ? '✓ Approved' : approving ? 'Approving…' : 'Approve'}
-              </button>
-              <button
-                className="wg-btn wg-btn--export"
-                onClick={async () => {
-                  if (exporting) return
-                  setExporting(true)
-                  try {
-                    const ws = getMtDateStr(weekStart)
-                    const res = await authFetch(`${API_BASE}/schedule/week?week_start=${ws}`)
-                    if (res.ok) {
-                      const data = await res.json()
-                      if ((data.blocks || []).length === 0) {
-                        addToast('No blocks to export', 'error')
-                      } else {
-                        downloadTimeBlocksICS(data.blocks, data.week_start)
-                      }
+            <button
+              className="wg-btn wg-btn--export"
+              onClick={async () => {
+                if (exporting) return
+                setExporting(true)
+                try {
+                  const ws = getMtDateStr(weekStart)
+                  const res = await authFetch(`${API_BASE}/schedule/week?week_start=${ws}`)
+                  if (res.ok) {
+                    const data = await res.json()
+                    if ((data.blocks || []).length === 0) {
+                      addToast('No blocks to export', 'error')
                     } else {
-                      addToast('Export failed', 'error')
+                      downloadTimeBlocksICS(data.blocks, data.week_start)
                     }
-                  } catch {
+                  } else {
                     addToast('Export failed', 'error')
-                  } finally {
-                    setExporting(false)
                   }
-                }}
-                disabled={exporting}
-                title="Export week to .ics"
-              >
-                {exporting ? 'Exporting…' : '↓ .ics'}
-              </button>
-            </>
+                } catch {
+                  addToast('Export failed', 'error')
+                } finally {
+                  setExporting(false)
+                }
+              }}
+              disabled={exporting}
+              title="Export week to calendar (.ics)"
+            >
+              {exporting ? 'Exporting…' : 'Export .ics'}
+            </button>
           )}
         </div>
       </div>
