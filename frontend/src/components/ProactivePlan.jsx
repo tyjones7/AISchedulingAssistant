@@ -251,7 +251,10 @@ export default function ProactivePlan({
           )}
           <button
             className="proactive-chat"
-            onClick={() => { onOpenChat?.(); dismiss() }}
+            onClick={() => {
+              onOpenChat?.()
+              if (!hasBlocks) dismiss()  // only dismiss when there's no plan to show
+            }}
           >
             {hasBlocks ? 'Chat to adjust' : 'Ask AI instead'}
           </button>

@@ -596,6 +596,22 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
         </div>
       </div>
 
+      {/* Empty state — shown above the grid so it's always visible */}
+      {!loading && blocks.length === 0 && (
+        <div className="wg-empty">
+          <p>{weekStartStr > todayStr ? 'No blocks scheduled for this week yet.' : 'No study blocks scheduled yet.'}</p>
+          <p className="wg-empty-hint">
+            Click <strong>Generate Plan</strong> for an AI-powered schedule, or{' '}
+            {onOpenChat && (
+              <button className="wg-empty-chat-link" onClick={() => onOpenChat('Help me build a study plan for this week. Ask me a few questions so we can make it work for me.')}>
+                chat with AI
+              </button>
+            )}
+            {!onOpenChat && 'chat with AI'} to plan collaboratively.
+          </p>
+        </div>
+      )}
+
       {/* Scrollable grid */}
       <div className="wg-scroll">
         {loading ? (
@@ -790,22 +806,6 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
           </div>
         )}
       </div>
-
-      {/* Empty state */}
-      {!loading && blocks.length === 0 && (
-        <div className="wg-empty">
-          <p>{weekStartStr > todayStr ? 'No blocks scheduled for this week yet.' : 'No study blocks scheduled yet.'}</p>
-          <p className="wg-empty-hint">
-            Click <strong>Generate Plan</strong> for an AI-powered schedule, or{' '}
-            {onOpenChat && (
-              <button className="wg-empty-chat-link" onClick={() => onOpenChat('Help me build a study plan for this week. Ask me a few questions so we can make it work for me.')}>
-                chat with AI
-              </button>
-            )}
-            {!onOpenChat && 'chat with AI'} to plan collaboratively.
-          </p>
-        </div>
-      )}
 
       {/* Click-to-edit popover */}
       {editingBlock && (
