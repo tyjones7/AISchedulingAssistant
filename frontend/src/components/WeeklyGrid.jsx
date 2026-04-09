@@ -536,6 +536,9 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
           <button className="wg-nav-btn" onClick={prevWeek} aria-label="Previous week">‹</button>
           <span className="wg-week-label">{weekLabel}</span>
           <button className="wg-nav-btn" onClick={nextWeek} aria-label="Next week">›</button>
+          {getMtDateStr(weekStart) !== getMtDateStr(getWeekStart(new Date())) && (
+            <button className="wg-today-btn" onClick={() => setWeekStart(getWeekStart(new Date()))}>Today</button>
+          )}
         </div>
         <div className="wg-actions">
           <button

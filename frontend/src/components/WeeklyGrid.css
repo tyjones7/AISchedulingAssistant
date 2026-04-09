@@ -38,6 +38,20 @@
 
 .wg-nav-btn:hover { border-color: #6366f1; background: #f5f3ff; }
 
+.wg-today-btn {
+  padding: 0 10px;
+  height: 32px;
+  border: 1.5px solid #6366f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #6366f1;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.wg-today-btn:hover { background: #f5f3ff; }
+
 .wg-week-label {
   font-size: 0.9rem;
   font-weight: 600;

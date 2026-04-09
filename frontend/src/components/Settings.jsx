@@ -39,6 +39,8 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
   const [advanceDays, setAdvanceDays] = useState(preferences?.advance_days ?? 1)
   const [workStyle, setWorkStyle] = useState(preferences?.work_style || 'spread_out')
   const [involvementLevel, setInvolvementLevel] = useState(preferences?.involvement_level || 'balanced')
+  const [workStart, setWorkStart] = useState(preferences?.work_start || '08:00')
+  const [workEnd, setWorkEnd] = useState(preferences?.work_end || '22:00')
   const [prefSaving, setPrefSaving] = useState(false)
   const [prefSaved, setPrefSaved] = useState(false)
   const [prefError, setPrefError] = useState(null)
@@ -125,6 +127,8 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     if (preferences.advance_days !== undefined) setAdvanceDays(preferences.advance_days)
     if (preferences.work_style) setWorkStyle(preferences.work_style)
     if (preferences.involvement_level) setInvolvementLevel(preferences.involvement_level)
+    if (preferences.work_start) setWorkStart(preferences.work_start)
+    if (preferences.work_end) setWorkEnd(preferences.work_end)
     if (preferences.weekly_schedule !== undefined) setSchedule(preferences.weekly_schedule || [])
     if (preferences.student_context !== undefined) setStudentContext(preferences.student_context || '')
     if (preferences.course_colors !== undefined) setCourseColorPrefs(preferences.course_colors || {})
@@ -427,6 +431,8 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
         work_style: workStyle,
         involvement_level: involvementLevel,
         weekly_schedule: schedule,
+        work_start: workStart,
+        work_end: workEnd,
       }
       const res = await authFetch(`${API_BASE}/preferences`, {
         method: 'POST',
@@ -489,7 +495,10 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
     Number(sessionLength) !== (preferences.session_length_minutes || 60) ||
     Number(advanceDays) !== (preferences.advance_days ?? 1) ||
     workStyle !== (preferences.work_style || 'spread_out') ||
-    involvementLevel !== (preferences.involvement_level || 'balanced')
+    involvementLevel !== (preferences.involvement_level || 'balanced') ||
+    workStart !== (preferences.work_start || '08:00') ||
+    workEnd !== (preferences.work_end || '22:00') ||
+    JSON.stringify(schedule) !== JSON.stringify(preferences.weekly_schedule || [])
   )
 
   const confirmClose = () => {
@@ -823,6 +832,26 @@ function Settings({ onLogout, preferences, onPreferencesChange, onClose }) {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="settings-pref-group">
+              <label className="settings-pref-label">Study window</label>
+              <div className="settings-time-row">
+                <input
+                  type="time"
+                  className="settings-time-input"
+                  value={workStart}
+                  onChange={(e) => setWorkStart(e.target.value)}
+                />
+                <span className="settings-time-sep">to</span>
+                <input
+                  type="time"
+                  className="settings-time-input"
+                  value={workEnd}
+                  onChange={(e) => setWorkEnd(e.target.value)}
+                />
+              </div>
+              <p className="settings-hint" style={{ marginTop: '6px' }}>Study blocks are only scheduled within this time range.</p>
             </div>
 
             <div className="settings-pref-group">
