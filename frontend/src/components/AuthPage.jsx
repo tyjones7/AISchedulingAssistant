@@ -53,7 +53,21 @@ function AuthPage({ onAuthSuccess }) {
         <div className="auth-brand">
           <div className="auth-logo">C</div>
           <h1 className="auth-app-name">CampusAI</h1>
-          <p className="auth-tagline">AI-powered assignment scheduling</p>
+          <p className="auth-tagline">AI-powered scheduling for BYU students</p>
+          <ul className="auth-features">
+            <li className="auth-feature">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              Syncs Canvas &amp; Learning Suite automatically
+            </li>
+            <li className="auth-feature">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.88 5.76a1 1 0 0 0 .95.69h6.06l-4.9 3.56a1 1 0 0 0-.36 1.12L17.5 20l-4.9-3.56a1 1 0 0 0-1.18 0L6.5 20l1.87-5.87a1 1 0 0 0-.36-1.12L3.11 9.45h6.06a1 1 0 0 0 .95-.69L12 3z"/></svg>
+              AI builds your weekly study plan
+            </li>
+            <li className="auth-feature">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Schedules around your classes &amp; commitments
+            </li>
+          </ul>
         </div>
 
         <div className="auth-card">
