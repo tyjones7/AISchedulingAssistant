@@ -232,8 +232,7 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, planning
           } catch { /* malformed SSE line — skip */ }
         }
       }
-    } catch (err) {
-      console.error('[AIChat] fetch error:', err)
+    } catch {
       setMessages((prev) => {
         const updated = [...prev]
         updated[updated.length - 1] = {
@@ -282,8 +281,7 @@ function AIChat({ addToast, involvementLevel = 'balanced', openChatRef, planning
         'success'
       )
       onPlanApplied?.()
-    } catch (err) {
-      console.error('[AIChat] apply-plan error:', err)
+    } catch {
       addToast('Failed to apply plan. Check your connection.', 'error')
     } finally {
       setIsApplying(false)

@@ -191,8 +191,7 @@ function Dashboard({ autoSync = false, onSyncTriggered, onLogout, preferences, o
       } else {
         addToast('Briefing generation failed. Make sure GROQ_API_KEY is set.', 'error')
       }
-    } catch (err) {
-      console.error('[Dashboard] handleGenerateAI error:', err)
+    } catch {
       addToast('AI generation failed. Check your connection.', 'error')
     } finally {
       setIsGeneratingAI(false)

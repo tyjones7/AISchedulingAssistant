@@ -114,8 +114,7 @@ function AssignmentDetail({ assignment, onClose, onUpdate }) {
       const data = await response.json()
       onUpdate(data.assignment)
       onClose()
-    } catch (err) {
-      console.error('Failed to save assignment:', err)
+    } catch {
       setSaveError('Failed to save. Please try again.')
     } finally {
       setSaving(false)

@@ -99,7 +99,6 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
           }
         }
       } catch (err) {
-        console.error('[SyncButton] Error polling status:', err.message)
         pollFailCount++
         if (pollFailCount >= MAX_POLL_FAILURES) {
           setError(`Cannot reach backend: ${err.message}`)
@@ -126,8 +125,8 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
       if (data.last_sync) {
         setLastSync(data.last_sync)
       }
-    } catch (err) {
-      console.error('[SyncButton] Error fetching last sync:', err.message)
+    } catch {
+      // silent — last sync info is non-critical
     }
   }
 
@@ -168,7 +167,6 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
       const data = await response.json()
       setTaskId(data.task_id)
     } catch (err) {
-      console.error('[SyncButton] Error starting sync:', err.message)
       let displayError = err.message || 'Failed to connect to backend'
       if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
         displayError = `Cannot connect to backend at ${API_BASE}. Is the server running?`

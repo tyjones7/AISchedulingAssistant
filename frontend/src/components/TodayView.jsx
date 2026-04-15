@@ -33,7 +33,7 @@ export default function TodayView({ assignments = [], addToast, refreshKey = 0 }
 
   useEffect(() => {
     fetchToday()
-  }, [refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   const fetchToday = async () => {
     setLoading(true)
