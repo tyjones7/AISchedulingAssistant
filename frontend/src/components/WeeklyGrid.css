@@ -237,6 +237,12 @@
 
 .wg-block--task {
   cursor: grab;
+  animation: blockIn 0.2s ease-out both;
+}
+
+@keyframes blockIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .wg-block--task:active { cursor: grabbing; }

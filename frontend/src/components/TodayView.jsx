@@ -131,7 +131,7 @@ export default function TodayView({ assignments = [], addToast, refreshKey = 0 }
       <section className="today-section">
         <h3 className="today-section-label">Study Blocks</h3>
         {loading ? (
-          <div className="today-loading">Loading…</div>
+          <div className="today-loading">Loading today's plan…</div>
         ) : blocks.length === 0 ? (
           <div className="today-empty">
             <p>No study blocks scheduled for today.</p>
