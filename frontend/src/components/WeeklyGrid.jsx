@@ -295,28 +295,27 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
     setLoading(true)
     const ws = getMtDateStr(weekStart)
     try {
-      const [schedRes, extRes, lsRes] = await Promise.all([
-        authFetch(`${API_BASE}/schedule/week?week_start=${ws}`),
-        authFetch(`${API_BASE}/external-calendars/events?week_start=${ws}`),
-        authFetch(`${API_BASE}/ls-feeds/class-events?week_start=${ws}`),
-      ])
+      // Fetch the schedule first — this is the critical path. Show it ASAP.
+      const schedRes = await authFetch(`${API_BASE}/schedule/week?week_start=${ws}`)
       if (schedRes.ok) {
         const data = await schedRes.json()
         setBlocks(data.blocks || [])
       }
-      if (extRes.ok) {
-        const extData = await extRes.json()
-        setExternalEvents(extData.events || [])
-      }
-      if (lsRes.ok) {
-        const lsData = await lsRes.json()
-        setLsClassEvents(lsData.events || [])
-      }
     } catch {
-      /* ignore */
+      /* ignore — show empty grid */
     } finally {
       setLoading(false)
     }
+    // Fetch auxiliary overlay data in the background (external calendars + LS class sessions).
+    // These are non-critical — a slow or failing feed shouldn't block the grid.
+    authFetch(`${API_BASE}/external-calendars/events?week_start=${ws}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setExternalEvents(d.events || []))
+      .catch(() => {})
+    authFetch(`${API_BASE}/ls-feeds/class-events?week_start=${ws}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setLsClassEvents(d.events || []))
+      .catch(() => {})
   }
 
   const handleGenerate = async () => {

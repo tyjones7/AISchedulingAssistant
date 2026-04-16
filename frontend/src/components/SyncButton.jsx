@@ -38,7 +38,7 @@ function SyncButton({ onSyncComplete, triggerSync, onSyncStarted, onSyncProgress
     if (!taskId || !syncing) return
 
     let pollFailCount = 0
-    const MAX_POLL_FAILURES = 3
+    const MAX_POLL_FAILURES = 8
 
     const pollStatus = async () => {
       const url = `${API_BASE}/sync/status/${taskId}`

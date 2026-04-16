@@ -78,11 +78,13 @@ function App() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const initUserState = async () => {
+    // If the backend is unreachable, don't hang the loading spinner forever.
+    const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))])
     try {
       // Check canvas connection and preferences in parallel
       const [canvasRes, prefsRes] = await Promise.all([
-        authFetch(`${API_BASE}/auth/canvas-status`).catch(() => null),
-        authFetch(`${API_BASE}/preferences`).catch(() => null),
+        withTimeout(authFetch(`${API_BASE}/auth/canvas-status`).catch(() => null), 8000),
+        withTimeout(authFetch(`${API_BASE}/preferences`).catch(() => null), 8000),
       ])
 
       let connected = false

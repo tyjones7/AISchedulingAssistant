@@ -50,7 +50,8 @@ def _get_groq_client():
 
         try:
             from groq import Groq
-            _groq_client = Groq(api_key=api_key)
+            # 30s timeout: enough for large prompts, prevents infinite hangs
+            _groq_client = Groq(api_key=api_key, timeout=30.0)
             logger.info("Groq client initialized")
             return _groq_client
         except ImportError:
@@ -581,18 +582,22 @@ def generate_briefing(
 
     logger.info(f"[ai_service] generate_briefing: {len(assignments)} assignment(s)")
 
-    resp = client.chat.completions.create(
-        model=_CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": _BRIEFING_SYSTEM},
-            {"role": "user", "content": context + "\n\nWrite the daily briefing now."},
-        ],
-        temperature=0.5,
-        max_tokens=300,
-    )
-    briefing = resp.choices[0].message.content.strip()
-    logger.info(f"[ai_service] briefing: {len(briefing)} chars")
-    return briefing
+    try:
+        resp = client.chat.completions.create(
+            model=_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": _BRIEFING_SYSTEM},
+                {"role": "user", "content": context + "\n\nWrite the daily briefing now."},
+            ],
+            temperature=0.5,
+            max_tokens=300,
+        )
+        briefing = resp.choices[0].message.content.strip()
+        logger.info(f"[ai_service] briefing: {len(briefing)} chars")
+        return briefing
+    except Exception as e:
+        logger.error(f"[ai_service] generate_briefing failed: {e}")
+        raise RuntimeError(f"Briefing generation failed: {e}") from e
 
 
 def generate_ai_schedule(
