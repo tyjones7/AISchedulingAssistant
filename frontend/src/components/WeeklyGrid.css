@@ -82,6 +82,7 @@
   color: #fff;
 }
 .wg-btn--generate:hover:not(:disabled) { background: #4f46e5; }
+.wg-btn--generate:disabled { opacity: 0.7; cursor: wait; background: #6366f1; }
 
 .wg-btn--export {
   background: #fff;
@@ -111,10 +112,27 @@
 }
 
 .wg-loading {
-  padding: 2rem;
+  padding: 3rem 2rem;
   text-align: center;
   color: #9ca3af;
   font-size: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wg-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid #e5e7eb;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: wg-spin 0.75s linear infinite;
+}
+
+@keyframes wg-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Grid layout */
@@ -286,8 +304,8 @@
 .wg-block--task:hover .wg-block-resize::after { opacity: 0.35; }
 
 .wg-block-title {
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -295,11 +313,12 @@
 }
 
 .wg-block-course {
-  font-size: 0.62rem;
-  opacity: 0.75;
+  font-size: 0.65rem;
+  opacity: 0.82;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .wg-block-remove {
@@ -365,15 +384,19 @@
 /* Empty state */
 .wg-empty {
   text-align: center;
-  padding: 3rem 1rem;
+  padding: 4rem 2rem;
   color: #6b7280;
   font-size: 0.9rem;
+  background: linear-gradient(135deg, #fafafa 0%, #f3f4f6 100%);
+  border-radius: 12px;
+  margin: 0.5rem;
 }
 
 .wg-empty-hint {
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   color: #9ca3af;
-  margin-top: 0.5rem;
+  margin-top: 0.6rem;
+  line-height: 1.5;
 }
 
 /* Empty state chat link */

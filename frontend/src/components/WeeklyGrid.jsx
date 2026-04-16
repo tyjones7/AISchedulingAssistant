@@ -618,7 +618,7 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
       {/* Scrollable grid */}
       <div className="wg-scroll">
         {loading ? (
-          <div className="wg-loading">Loading schedule…</div>
+          <div className="wg-loading"><div className="wg-loading-spinner" />Loading schedule…</div>
         ) : (
           <div className="wg-grid">
             {/* Time labels column */}
