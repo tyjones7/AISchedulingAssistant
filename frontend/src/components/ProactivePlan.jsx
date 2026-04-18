@@ -54,6 +54,7 @@ export default function ProactivePlan({
 }) {
   const [blocks, setBlocks] = useState(null)   // null = loading, [] = empty
   const [generating, setGenerating] = useState(false)
+  const [slowGenerate, setSlowGenerate] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(DISMISS_KEY) === new Date().toDateString() }
@@ -102,6 +103,8 @@ export default function ProactivePlan({
 
   const handleGenerate = async () => {
     setGenerating(true)
+    setSlowGenerate(false)
+    const slowTimer = setTimeout(() => setSlowGenerate(true), 8000)
     try {
       const res = await authFetch(`${API_BASE}/schedule/generate`, { method: 'POST' })
       if (res.ok) {
@@ -115,7 +118,9 @@ export default function ProactivePlan({
     } catch {
       addToast('Failed to generate plan.', 'error')
     } finally {
+      clearTimeout(slowTimer)
       setGenerating(false)
+      setSlowGenerate(false)
     }
   }
 
@@ -183,7 +188,12 @@ export default function ProactivePlan({
       {isLoading && (
         <div className="proactive-generating">
           <span className="proactive-spinner" />
-          <span>{generating ? 'Generating your plan…' : 'Loading schedule…'}</span>
+          <div>
+            <span>{generating ? 'Generating your plan…' : 'Loading schedule…'}</span>
+            {slowGenerate && (
+              <div className="proactive-slow-msg">Groq is thinking… almost there</div>
+            )}
+          </div>
         </div>
       )}
 

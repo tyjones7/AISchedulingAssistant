@@ -184,6 +184,7 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
   const [lsClassEvents, setLsClassEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [slowGenerate, setSlowGenerate] = useState(false)
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()))
   const [draggedBlockId, setDraggedBlockId] = useState(null)
   const [exporting, setExporting] = useState(false)
@@ -320,6 +321,8 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
 
   const handleGenerate = async () => {
     setGenerating(true)
+    setSlowGenerate(false)
+    const slowTimer = setTimeout(() => setSlowGenerate(true), 8000)
     try {
       const res = await authFetch(`${API_BASE}/schedule/generate`, { method: 'POST' })
       if (res.ok) {
@@ -337,7 +340,9 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
     } catch {
       addToast('Failed to generate schedule', 'error')
     } finally {
+      clearTimeout(slowTimer)
       setGenerating(false)
+      setSlowGenerate(false)
     }
   }
 
@@ -540,13 +545,18 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
           )}
         </div>
         <div className="wg-actions">
-          <button
-            className="wg-btn wg-btn--generate"
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? 'Generating…' : 'Generate Plan'}
-          </button>
+          <div className="wg-generate-wrap">
+            <button
+              className="wg-btn wg-btn--generate"
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              {generating ? 'Generating…' : 'Generate Plan'}
+            </button>
+            {slowGenerate && (
+              <span className="wg-slow-msg">Groq is thinking… almost there</span>
+            )}
+          </div>
           {onOpenChat && (
             <button
               className="wg-btn wg-btn--chat"
@@ -579,6 +589,7 @@ export default function WeeklyGrid({ preferences, addToast, onOpenChat, refreshK
                       addToast('No blocks to export', 'error')
                     } else {
                       downloadTimeBlocksICS(data.blocks, data.week_start)
+                      addToast('Calendar file downloaded — import it into Google Cal or Apple Calendar', 'success')
                     }
                   } else {
                     addToast('Export failed', 'error')

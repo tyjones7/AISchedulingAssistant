@@ -43,11 +43,11 @@ function App() {
   const [preferences, setPreferences] = useState(null)
   const [showOnboarding, setShowOnboarding] = useState(false)
 
-  // Keep-alive ping every 14 minutes
+  // Keep-alive ping every 10 minutes (Render free tier sleeps after 15 min)
   useEffect(() => {
     const ping = () => fetch(`${API_BASE}/ping`).catch(() => {})
     ping()
-    const interval = setInterval(ping, 14 * 60 * 1000)
+    const interval = setInterval(ping, 10 * 60 * 1000)
     return () => clearInterval(interval)
   }, [])
 

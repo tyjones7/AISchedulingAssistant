@@ -63,6 +63,25 @@
 .wg-actions {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+}
+
+.wg-generate-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wg-slow-msg {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  white-space: nowrap;
+  animation: wg-fade-in 0.3s ease;
+}
+
+@keyframes wg-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .wg-btn {

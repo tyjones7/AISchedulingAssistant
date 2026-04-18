@@ -80,6 +80,18 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.proactive-slow-msg {
+  font-size: 0.72rem;
+  color: #9ca3af;
+  margin-top: 0.2rem;
+  animation: fade-in-slow 0.3s ease;
+}
+
+@keyframes fade-in-slow {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* Block list */
 .proactive-list {
   list-style: none;
