@@ -205,15 +205,10 @@ USER_PREFS = {
 def get_user_id(email: str) -> str:
     """Look up user_id from Supabase Auth by email."""
     result = supabase.auth.admin.list_users()
-    for user in result:
-        if hasattr(user, '__iter__'):
-            for u in user:
-                if hasattr(u, 'email') and u.email == email:
-                    return u.id
-        elif hasattr(result, 'users'):
-            for u in result.users:
-                if u.email == email:
-                    return u.id
+    users = result if isinstance(result, list) else getattr(result, 'users', [])
+    for u in users:
+        if getattr(u, 'email', None) == email:
+            return u.id
     raise ValueError(f"No user found with email: {email}")
 
 
@@ -228,11 +223,12 @@ def seed_database(user_id: str):
         supabase.table("assignments").insert({**a, "user_id": user_id}).execute()
         print(f"  Added: {a['title']}")
 
-    # Upsert user preferences
-    supabase.table("user_preferences").upsert(
-        {**USER_PREFS, "user_id": user_id},
-        on_conflict="user_id"
-    ).execute()
+    # Upsert user preferences (select-then-insert/update, no unique constraint on user_id)
+    existing = supabase.table("user_preferences").select("id").eq("user_id", user_id).limit(1).execute()
+    if existing.data:
+        supabase.table("user_preferences").update({**USER_PREFS}).eq("id", existing.data[0]["id"]).execute()
+    else:
+        supabase.table("user_preferences").insert({**USER_PREFS, "user_id": user_id}).execute()
     print("  Set user preferences (study time, course colors, weekly schedule, student context).")
 
     print(f"\nDone! {len(ASSIGNMENTS)} assignments + preferences seeded.")
